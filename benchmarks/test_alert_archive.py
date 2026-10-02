@@ -5,6 +5,7 @@ Display the runtimes on the console with::
 
     pytest benchmarks/test_alert_archive.py --durations=0
 """
+
 from pathlib import Path
 
 import lsdb
@@ -31,6 +32,7 @@ def dask_client():
 
 @pytest.fixture(scope="session")
 def alert_archive():
+    """Open the Rubin alert archive catalog."""
     return lsdb.open_catalog("/astro/store/shire/hats/catalogs/rubin_alert_archive")
 
 
