@@ -85,20 +85,16 @@ def test_naive_lc_aggregation(num_samples, alert_archive, dask_client):
     sample_ids = np.load(SAMPLES_PATH)[:num_samples]
 
     def aggregate_lightcurves(df):
-        # Push source columns of interest to the base
-        df["diaObjectId"] = df["diaSource.diaObjectId"]
-        df["midpointMjdTai"] = df["diaSource.midpointMjdTai"]
-        df["psfFlux"] = df["diaSource.psfFlux"]
-        df["psfFluxErr"] = df["diaSource.psfFluxErr"]
-        df["band"] = df["diaSource.band"]
+        # Flatten diaSource to one row per source, carrying the base columns along
+        flat = df["diaSource"].nest.to_flat().join(df[["ra", "dec"]])
         # Query for desired object IDs
-        df = df.query(f"diaObjectId in {sample_ids.tolist()}")
-        # Save sources healpix index
-        df = df.reset_index(drop=False)
+        flat = flat.query(f"diaObjectId in {sample_ids.tolist()}")
+        # Move the sources' healpix index into a column
+        flat = flat.reset_index(drop=False)
         # Create object light curves
         return (
             NestedFrame.from_flat(
-                df,
+                flat,
                 base_columns=["ra", "dec", SPATIAL_INDEX_COLUMN],
                 nested_columns=["diaSourceId", "midpointMjdTai", "band", "psfFlux", "psfFluxErr"],
                 on="diaObjectId",
