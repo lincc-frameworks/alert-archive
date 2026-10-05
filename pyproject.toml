@@ -32,6 +32,13 @@ dev = [
     "pytest-cov", # Used to report total code coverage
     "ruff", # Used for static linting of files
 ]
+benchmark = [
+    "lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking", # Benchmarking harness (pytest plugin + dashboard)
+    "lsdb",
+    "nested-pandas",
+    "hats",
+    "astropy",
+]
 
 [build-system]
 requires = [
