@@ -18,6 +18,9 @@ classifiers = [
 dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
+    "lsdb",
+    "nested-pandas",
+    "hats",
 ]
 
 [project.urls]
@@ -31,6 +34,10 @@ dev = [
     "pytest",
     "pytest-cov", # Used to report total code coverage
     "ruff", # Used for static linting of files
+]
+benchmark = [
+    "lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking", # Benchmarking harness (pytest plugin + dashboard)
+    "astropy",
 ]
 
 [build-system]
