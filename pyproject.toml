@@ -18,6 +18,9 @@ classifiers = [
 dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
+    "lsdb",
+    "nested-pandas",
+    "hats",
 ]
 
 [project.urls]
@@ -34,9 +37,6 @@ dev = [
 ]
 benchmark = [
     "lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking", # Benchmarking harness (pytest plugin + dashboard)
-    "lsdb",
-    "nested-pandas",
-    "hats",
     "astropy",
 ]
 

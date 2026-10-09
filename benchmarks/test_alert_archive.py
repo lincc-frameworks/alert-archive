@@ -1,13 +1,9 @@
 """
 Benchmarks for common operations with the Rubin Alert Archive.
 
-Run under lf-bench to record timings, cProfile output, and Dask performance
-reports::
+Run under lf-bench to record timings, profiles, and Dask reports::
 
     pytest --lbench benchmarks/test_alert_archive.py
-
-The catalog location defaults to the HPC path; override it with the
-ALERT_ARCHIVE_CATALOG_DIR environment variable (see ``conftest.py``).
 """
 
 from pathlib import Path
@@ -29,35 +25,34 @@ def mjd_tai_interval(day="2026-02-24"):
 
 
 def test_get_sources_for_night(alert_archive, lbench_dask):
-    """Get all sources for a particular night."""
+    """Get all sources for a particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
     night_data = alert_archive.query(
         f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
-    ).map_partitions(lambda df: df.dropna(subset="diaSource"))
+    )
+    night_data = night_data.map_partitions(lambda df: df.dropna(subset="diaSource"))
     lbench_dask(night_data.compute)
 
 
 def test_cone_search_for_night(alert_archive, lbench_dask):
-    """One degree cone search over a particular night."""
+    """One degree cone search over a particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
-    night_cone = (
-        alert_archive.cone_search(ra=63.2, dec=-47.8, radius_arcsec=3600)
-        .query(f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}")
-        .map_partitions(lambda df: df.dropna(subset="diaSource"))
+    cone = alert_archive.cone_search(ra=63.2, dec=-47.8, radius_arcsec=3600)
+    night_cone = cone.query(
+        f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
     )
+    night_cone = night_cone.map_partitions(lambda df: df.dropna(subset="diaSource"))
     lbench_dask(night_cone.compute)
 
 
 def test_new_objects_for_night(alert_archive, lbench_dask):
-    """New objects for a particular night."""
+    """New objects for particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
-    night_data = (
-        alert_archive.query(
-            f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
-        )
-        .query("diaObject.nDiaSources == 1")
-        .map_partitions(lambda df: df.dropna(subset=["diaSource", "diaObject"]))
+    night_data = alert_archive.query(
+        f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
     )
+    night_data = night_data.query("diaObject.nDiaSources == 1")
+    night_data = night_data.map_partitions(lambda df: df.dropna(subset=["diaSource", "diaObject"]))
     lbench_dask(night_data.compute)
 
 
@@ -94,41 +89,37 @@ def test_naive_lc_aggregation(num_samples, alert_archive, lbench_dask):
             .set_index(SPATIAL_INDEX_COLUMN)
         )
 
-    light_curves = alert_archive.map_partitions(aggregate_lightcurves)
-    lbench_dask(light_curves.compute)
+    lbench_dask(alert_archive.map_partitions(aggregate_lightcurves).compute)
 
 
 def test_per_night_counts(alert_archive, lbench_dask):
-    """Per-night aggregate counts."""
+    """Per-night aggregate counts"""
 
     def get_counts(df):
         return np.floor(df["diaSource.midpointMjdTai"]).astype(int).value_counts()
 
-    per_partition = alert_archive.map_partitions(get_counts)
+    def per_night_counts():
+        per_partition = alert_archive.map_partitions(get_counts).compute()
+        per_partition.groupby(level=0).sum()
 
-    def counts_per_night():
-        per_partition.compute().groupby(level=0).sum()
-
-    lbench_dask(counts_per_night)
+    lbench_dask(per_night_counts)
 
 
 def test_per_band_counts(alert_archive, lbench_dask):
-    """Per-band aggregate counts."""
+    """Per-band aggregate counts"""
 
     def get_counts(df):
         return df["diaSource.band"].value_counts()
 
-    per_partition = alert_archive.map_partitions(get_counts)
+    def per_band_counts():
+        per_partition = alert_archive.map_partitions(get_counts).compute()
+        per_partition.groupby(level=0).sum()
 
-    def counts_per_band():
-        per_partition.compute().groupby(level=0).sum()
-
-    lbench_dask(counts_per_band)
+    lbench_dask(per_band_counts)
 
 
 def test_crossmatch(alert_archive, gaia, lbench_dask):
-    """Crossmatch with another catalog."""
+    """Crossmatch with another catalog"""
     # This cone has >2M rows
     cone = alert_archive.cone_search(ra=63.2, dec=-47.8, radius_arcsec=7200)
-    crossmatched = cone.crossmatch(gaia)
-    lbench_dask(crossmatched.compute)
+    lbench_dask(cone.crossmatch(gaia).compute)
