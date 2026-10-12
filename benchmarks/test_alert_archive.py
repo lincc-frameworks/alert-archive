@@ -16,6 +16,18 @@ from nested_pandas import NestedFrame
 
 SAMPLES_PATH = Path(__file__).parent / "diaObjectId_samples.npy"
 
+# The catalogs define no default columns, so each benchmark selects what it uses.
+# ``ra``/``dec`` are always loaded by lsdb.
+SOURCE_COLUMNS = [
+    "diaSourceId",
+    "diaSource.diaObjectId",
+    "diaSource.midpointMjdTai",
+    "diaSource.band",
+    "diaSource.psfFlux",
+    "diaSource.psfFluxErr",
+]
+GAIA_COLUMNS = ["source_id", "ra", "dec", "phot_g_mean_mag"]
+
 
 def mjd_tai_interval(day="2026-02-24"):
     """Return the half-open TAI MJD interval [start, end) for a UTC calendar day."""
@@ -27,7 +39,7 @@ def mjd_tai_interval(day="2026-02-24"):
 def test_get_sources_for_night(alert_archive, lbench_dask):
     """Get all sources for a particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
-    night_data = alert_archive.query(
+    night_data = alert_archive(SOURCE_COLUMNS).query(
         f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
     )
     night_data = night_data.map_partitions(lambda df: df.dropna(subset="diaSource"))
@@ -37,7 +49,7 @@ def test_get_sources_for_night(alert_archive, lbench_dask):
 def test_cone_search_for_night(alert_archive, lbench_dask):
     """One degree cone search over a particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
-    cone = alert_archive.cone_search(ra=63.2, dec=-47.8, radius_arcsec=3600)
+    cone = alert_archive(SOURCE_COLUMNS).cone_search(ra=63.2, dec=-47.8, radius_arcsec=3600)
     night_cone = cone.query(
         f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
     )
@@ -48,7 +60,8 @@ def test_cone_search_for_night(alert_archive, lbench_dask):
 def test_new_objects_for_night(alert_archive, lbench_dask):
     """New objects for particular night"""
     mjd_start, mjd_end = mjd_tai_interval()
-    night_data = alert_archive.query(
+    columns = SOURCE_COLUMNS + ["diaObject.diaObjectId", "diaObject.nDiaSources"]
+    night_data = alert_archive(columns).query(
         f"diaSource.midpointMjdTai >= {mjd_start} and diaSource.midpointMjdTai < {mjd_end}"
     )
     night_data = night_data.query("diaObject.nDiaSources == 1")
@@ -73,7 +86,7 @@ def test_naive_lc_aggregation(num_samples, alert_archive, lbench_dask):
         df["psfFluxErr"] = df["diaSource.psfFluxErr"]
         df["band"] = df["diaSource.band"]
         # Query for desired object IDs
-        df = df.query(f"diaObjectId in {sample_ids.tolist()}")
+        df = df[df["diaObjectId"].isin(sample_ids)]
         # Save sources healpix index
         df = df.reset_index(drop=False)
         # Create object light curves
@@ -89,17 +102,19 @@ def test_naive_lc_aggregation(num_samples, alert_archive, lbench_dask):
             .set_index(SPATIAL_INDEX_COLUMN)
         )
 
-    lbench_dask(alert_archive.map_partitions(aggregate_lightcurves).compute)
+    lbench_dask(alert_archive(SOURCE_COLUMNS).map_partitions(aggregate_lightcurves).compute)
 
 
 def test_per_night_counts(alert_archive, lbench_dask):
     """Per-night aggregate counts"""
 
+    catalog = alert_archive(["diaSource.midpointMjdTai"])
+
     def get_counts(df):
         return np.floor(df["diaSource.midpointMjdTai"]).astype(int).value_counts()
 
     def per_night_counts():
-        per_partition = alert_archive.map_partitions(get_counts).compute()
+        per_partition = catalog.map_partitions(get_counts).compute()
         per_partition.groupby(level=0).sum()
 
     lbench_dask(per_night_counts)
@@ -108,11 +123,13 @@ def test_per_night_counts(alert_archive, lbench_dask):
 def test_per_band_counts(alert_archive, lbench_dask):
     """Per-band aggregate counts"""
 
+    catalog = alert_archive(["diaSource.band"])
+
     def get_counts(df):
         return df["diaSource.band"].value_counts()
 
     def per_band_counts():
-        per_partition = alert_archive.map_partitions(get_counts).compute()
+        per_partition = catalog.map_partitions(get_counts).compute()
         per_partition.groupby(level=0).sum()
 
     lbench_dask(per_band_counts)
@@ -121,5 +138,5 @@ def test_per_band_counts(alert_archive, lbench_dask):
 def test_crossmatch(alert_archive, gaia, lbench_dask):
     """Crossmatch with another catalog"""
     # This cone has >2M rows
-    cone = alert_archive.cone_search(ra=63.2, dec=-47.8, radius_arcsec=7200)
-    lbench_dask(cone.crossmatch(gaia).compute)
+    cone = alert_archive(SOURCE_COLUMNS).cone_search(ra=63.2, dec=-47.8, radius_arcsec=7200)
+    lbench_dask(cone.crossmatch(gaia(GAIA_COLUMNS)).compute)

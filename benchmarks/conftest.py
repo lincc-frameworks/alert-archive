@@ -7,9 +7,10 @@ from pathlib import Path
 import lsdb
 import pytest
 from dask.distributed import Client, LocalCluster
+from lbench.runner import run_cprofile, run_memray
 
 # Default to the catalog store on the HPC; override with ALERT_ARCHIVE_CATALOG_DIR.
-DEFAULT_CATALOG_DIR = "/astro/store/shire/hats/catalogs"
+# DEFAULT_CATALOG_DIR = "/astro/store/shire/hats/catalogs"
 
 
 @pytest.hookimpl(trylast=True)
@@ -33,22 +34,38 @@ def pytest_configure(config):
             session.json = path
 
 
-@pytest.fixture(scope="session")
-def catalog_dir():
-    """Root directory holding the HATS catalogs."""
-    return Path(os.environ.get("ALERT_ARCHIVE_CATALOG_DIR", DEFAULT_CATALOG_DIR))
+# @pytest.fixture(scope="session")
+# def catalog_dir():
+#     """Root directory holding the HATS catalogs."""
+#     return Path(os.environ.get("ALERT_ARCHIVE_CATALOG_DIR", DEFAULT_CATALOG_DIR))
+
+
+ALERT_ARCHIVE_PATH = "/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive"
+GAIA_PATH = "/sdf/data/rubin/cosmicdata/lsdb/gaia_dr3"
 
 
 @pytest.fixture(scope="session")
-def alert_archive(catalog_dir):
-    """Open the Rubin alert archive catalog."""
-    return lsdb.open_catalog(catalog_dir / "rubin_alert_archive")
+def alert_archive():
+    """Return an opener for the Rubin alert archive catalog.
+
+    The catalog has no ``default_columns``, so opening it bare loads every
+    column, including the ``prvDiaSources`` and ``prvDiaForcedSources`` histories
+    (~134 MB per partition in memory, vs ~5-10 MB for a few ``diaSource``
+    fields). Each benchmark passes the columns it needs; nested sub-columns
+    use dot notation, e.g. ``"diaSource.band"``.
+    """
+    # return lsdb.open_catalog(catalog_dir / "rubin_alert_archive")
+    return lambda columns: lsdb.open_catalog(ALERT_ARCHIVE_PATH, columns=columns)
 
 
 @pytest.fixture(scope="session")
-def gaia(catalog_dir):
-    """Open the Gaia DR3 catalog used for crossmatch benchmarks."""
-    return lsdb.open_catalog(catalog_dir / "gaia_dr3")
+def gaia():
+    """Return an opener for the Gaia DR3 catalog used for crossmatch benchmarks.
+
+    Gaia has 152 columns and no ``default_columns``, so always select a subset.
+    """
+    # return lsdb.open_catalog(catalog_dir / "gaia_dr3")
+    return lambda columns: lsdb.open_catalog(GAIA_PATH, columns=columns)
 
 
 @pytest.fixture(scope="session")
@@ -66,3 +83,28 @@ def single_thread_dask_client():
     yield client
     client.close()
     cluster.close()
+
+
+@pytest.fixture
+def lbench(benchmark_results_dir, benchmark, request):
+    """Override lf-bench's ``lbench`` fixture so the cProfile pass can be skipped.
+
+    Same as upstream, except the extra cProfile run of each benchmark is skipped
+    when ALERT_ARCHIVE_CPROFILE=0. Under Dask that profile only covers the
+    driver process, which mostly waits on workers. ``lbench_dask`` depends on
+    this fixture by name, so it picks up the override.
+    """
+    with_cprofile = os.environ.get("ALERT_ARCHIVE_CPROFILE", "1") != "0"
+
+    def lbench_benchmark_func(func, *args, **kwargs):
+        benchmark(func, *args, **kwargs)
+
+        if request.node.get_closest_marker("lbench_memory") is not None:
+            peak_memory = run_memray(func, benchmark_results_dir, *args, **kwargs)
+            benchmark.extra_info["peak_memory_bytes"] = peak_memory
+
+        if with_cprofile:
+            cprof_path = run_cprofile(func, benchmark_results_dir, *args, **kwargs)
+            benchmark.extra_info["cprofile_path"] = cprof_path
+
+    return lbench_benchmark_func
