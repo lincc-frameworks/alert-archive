@@ -87,17 +87,24 @@ def single_thread_dask_client():
 
 @pytest.fixture
 def lbench(benchmark_results_dir, benchmark, request):
-    """Override lf-bench's ``lbench`` fixture so the cProfile pass can be skipped.
+    """Override lf-bench's ``lbench`` fixture to fix the run count and allow skipping cProfile.
 
-    Same as upstream, except the extra cProfile run of each benchmark is skipped
-    when ALERT_ARCHIVE_CPROFILE=0. Under Dask that profile only covers the
-    driver process, which mostly waits on workers. ``lbench_dask`` depends on
-    this fixture by name, so it picks up the override.
+    Differs from lf-bench's original ``lbench`` fixture in two ways:
+
+    - Timing uses ``benchmark.pedantic`` with one untimed warm-up run and 5
+      timed rounds, so results are deliberately warm-cache. Plain
+      ``benchmark(func)`` instead adds an untimed calibration run and an extra
+      untimed call to produce a return value that is never used.
+    - The extra cProfile run is skipped when ALERT_ARCHIVE_CPROFILE=0. Under
+      Dask that profile only covers the driver process, which mostly waits on
+      workers.
+
+    ``lbench_dask`` depends on this fixture by name, so it picks up the override.
     """
     with_cprofile = os.environ.get("ALERT_ARCHIVE_CPROFILE", "1") != "0"
 
     def lbench_benchmark_func(func, *args, **kwargs):
-        benchmark(func, *args, **kwargs)
+        benchmark.pedantic(func, args=args, kwargs=kwargs, rounds=5, iterations=1, warmup_rounds=1)
 
         if request.node.get_closest_marker("lbench_memory") is not None:
             peak_memory = run_memray(func, benchmark_results_dir, *args, **kwargs)
