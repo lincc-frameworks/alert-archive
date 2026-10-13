@@ -1,0 +1,60 @@
+#!/bin/bash
+# Nightly alert archive benchmark job, submitted by submit.sh as:
+#
+#   sbatch run.sbatch <base dir> <LSST conda env name> <results dir>
+#
+# Runs on a whole milano node (RHEL 9.6) so timings stay comparable night to
+# night. Preemptable: if preempted, the run is cancelled and that night has no
+# results (sacct shows PREEMPTED).
+#SBATCH --job-name=alert-archive-bench
+#SBATCH --account=rubin:default
+#SBATCH --partition=milano
+#SBATCH --qos=preemptable
+#SBATCH --constraint=OS_VER:9.6
+#SBATCH --exclusive
+#SBATCH --mem=0
+#SBATCH --time=04:00:00
+
+set -uo pipefail
+
+base=$1
+repo=$base/alert-archive
+results=$3
+
+# Pin the conda env rather than taking loadLSST.sh's default, which Rubin bumps.
+# lsst_distrib isn't set up; the benchmarks only need the venv's packages.
+export LSST_CONDA_ENV_NAME=$2
+source /sdf/group/rubin/sw/loadLSST.sh
+source "$base/venv/bin/activate"
+
+export LBENCH_ROOT=$results
+export ALERT_ARCHIVE_CPROFILE=0
+
+echo "node: $(hostname)  job: $SLURM_JOB_ID  alert-archive: $(git -C "$repo" rev-parse HEAD)"
+
+cd "$repo"
+marker=$(mktemp)
+python -m pytest --lbench benchmarks/test_alert_archive.py -p no:cacheprovider
+status=$?
+
+# Record what was benchmarked next to the results. pytest-benchmark already
+# stores the node and the alert-archive commit in its JSON; this adds the
+# exact package versions. Only look at run dirs created by this job, so a run
+# that died before lbench made its dir can't overwrite an earlier night's file.
+run_dir=$(find "$results" -mindepth 1 -maxdepth 1 -type d -newer "$marker" | sort | tail -1)
+rm -f "$marker"
+if [[ -z $run_dir ]]; then
+    echo "no lbench run dir was created; pytest exit status $status" >&2
+    exit $status
+fi
+{
+    echo "slurm_job_id: $SLURM_JOB_ID"
+    echo "node: $(hostname)"
+    echo "lsst_conda_env: $LSST_CONDA_ENV_NAME"
+    echo "alert_archive_commit: $(git -C "$repo" rev-parse HEAD)"
+    echo "pytest_exit_status: $status"
+    echo "--- pip freeze ---"
+    pip freeze
+} > "$run_dir/versions.txt"
+
+exit $status

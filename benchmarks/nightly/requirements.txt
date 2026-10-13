@@ -1,0 +1,11 @@
+# Pinned packages for the nightly benchmark venv (see run.sbatch / submit.sh).
+# dask, distributed, astropy, numpy and pandas come from the LSST conda env
+# the venv is layered on. Changing a pin here and merging to main makes the
+# next nightly run reinstall the venv, so jumps in results line up with a commit.
+lsdb==0.11.0
+hats==0.11.0
+nested-pandas==0.7.2
+pytest-benchmark==5.3.0
+# lsdb-benchmarking main as of 2026-10-12. Bump to the merge commit of the
+# --benchmark-json fix to drop the pytest_configure workaround in conftest.py.
+lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking@a214c4aa71baa1819a661cbffc1a5fb3672a0220
