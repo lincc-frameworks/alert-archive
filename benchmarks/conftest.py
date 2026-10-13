@@ -2,7 +2,6 @@
 
 import contextlib
 import os
-from pathlib import Path
 
 import lsdb
 import pytest
