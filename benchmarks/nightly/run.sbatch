@@ -24,7 +24,13 @@ results=$3
 # Pin the conda env rather than taking loadLSST.sh's default, which Rubin bumps.
 # lsst_distrib isn't set up; the benchmarks only need the venv's packages.
 export LSST_CONDA_ENV_NAME=$2
+# The "shellcheck source=/dev/null" lines tell shellcheck (run on PRs by
+# .github/workflows/nightly-benchmark-checks.yml) not to look inside the file
+# sourced on the next line: these files only exist on S3DF, so the check would
+# otherwise fail because it can't find them.
+# shellcheck source=/dev/null
 source /sdf/group/rubin/sw/loadLSST.sh
+# shellcheck source=/dev/null
 source "$base/venv/bin/activate"
 
 # Ignore ~/.local (pip --user installs, e.g. an editable ~/lsdb). A venv made
@@ -40,7 +46,7 @@ export ALERT_ARCHIVE_CPROFILE=0
 
 echo "node: $(hostname)  job: $SLURM_JOB_ID  alert-archive: $(git -C "$repo" rev-parse HEAD)"
 
-cd "$repo"
+cd "$repo" || exit 1
 marker=$(mktemp)
 python -m pytest --lbench benchmarks/test_alert_archive.py -p no:cacheprovider
 status=$?
