@@ -18,7 +18,7 @@ def pytest_configure(config):
     """Work around lf-bench handing pytest-benchmark a file handle instead of a path.
 
     lf-bench's ``--lbench`` setup assigns an open file object to
-    ``config.option.benchmark_json``; pytest-benchmark >= 5 caches that into its
+    ``config.option.benchmark_json``; pytest-benchmark >= 5.3.0 caches that into its
     session and then calls ``open()`` on it at finish, crashing before any
     results are written. Patch the live session's ``json`` attribute to the
     handle's path so the results JSON is saved. Runs ``trylast`` so
