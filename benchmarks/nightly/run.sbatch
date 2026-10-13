@@ -13,7 +13,7 @@
 #SBATCH --constraint=OS_VER:9.6
 #SBATCH --exclusive
 #SBATCH --mem=0
-#SBATCH --time=04:00:00
+#SBATCH --time=02:00:00
 
 set -o pipefail
 

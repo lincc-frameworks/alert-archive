@@ -15,7 +15,7 @@
 #
 # What it does:
 #   1. Resets the job's own clone of alert-archive to the requested branch on
-#      GitHub (main by default), so only pushed, committed work is benchmarked;
+#      GitHub (main by default), so only pushed & committed work is benchmarked;
 #      never anyone's local checkout. This happens here, not in the Slurm job,
 #      because compute nodes have limited outbound network access.
 #   2. Makes sure the venv with the pinned packages exists and matches
@@ -110,7 +110,7 @@ main() {
     # stamp doesn't exist yet (first run).
     if ! cmp -s "$reqs" "$stamp"; then
         log "requirements changed; reinstalling venv packages"
-        "$venv/bin/pip" install --quiet -r "$reqs" >> "$logs/pip.log" 2>&1
+        "$venv/bin/pip" install -r "$reqs" >> "$logs/pip.log" 2>&1
         # Only written after pip succeeds, so a failed install is retried on
         # the next run instead of being treated as done.
         cp "$reqs" "$stamp"
