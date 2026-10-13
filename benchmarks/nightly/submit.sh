@@ -88,8 +88,15 @@ main() {
     # --- 2. Make sure the venv matches the pins -----------------------------
     # The venv sees the LSST env's packages (--system-site-packages), so dask,
     # astropy, etc. come from there; only the pinned packages are installed
-    # into it. A venv also ignores ~/.local, so personal editable installs
-    # (e.g. ~/lsdb) can't leak into the benchmarks.
+    # into it.
+    #
+    # A venv made with --system-site-packages still sees ~/.local (the "user
+    # site", where `pip install --user` puts things). PYTHONNOUSERSITE=1 turns
+    # that off, so personal installs (e.g. the editable ~/lsdb) can't leak in.
+    # pip needs it too: otherwise it sees a package in ~/.local, reports
+    # "already satisfied", and skips installing it into the venv.
+    # run.sbatch sets the same variable for the benchmarks themselves.
+    export PYTHONNOUSERSITE=1
     local reqs=$repo/benchmarks/nightly/requirements.txt
     # Copy of the requirements file as of the last successful install. If the
     # current file differs, the pins changed and the venv needs updating.

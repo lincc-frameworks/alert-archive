@@ -15,7 +15,7 @@
 #SBATCH --mem=0
 #SBATCH --time=04:00:00
 
-set -uo pipefail
+set -o pipefail
 
 base=$1
 repo=$base/alert-archive
@@ -26,6 +26,14 @@ results=$3
 export LSST_CONDA_ENV_NAME=$2
 source /sdf/group/rubin/sw/loadLSST.sh
 source "$base/venv/bin/activate"
+
+# Ignore ~/.local (pip --user installs, e.g. an editable ~/lsdb). A venv made
+# with --system-site-packages would otherwise still import from there.
+export PYTHONNOUSERSITE=1
+
+# Treat unset variables as errors from here on. Not set earlier because the
+# conda activation scripts sourced above read variables that may be unset.
+set -u
 
 export LBENCH_ROOT=$results
 export ALERT_ARCHIVE_CPROFILE=0
