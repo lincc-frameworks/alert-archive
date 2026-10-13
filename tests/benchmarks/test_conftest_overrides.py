@@ -6,11 +6,9 @@ the real benchmarks/conftest.py and ``--lbench``, benchmarking a tiny Dask
 computation that counts how often it's called.
 """
 
-import importlib.util
 import json
 import site
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
