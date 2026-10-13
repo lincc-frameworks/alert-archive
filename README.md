@@ -7,14 +7,14 @@
 
 Tools and benchmarks for the Rubin alert archive, built on LSDB.
 
-## To test a single benchmark
-```
-cd ~/alert-archive
-ALERT_ARCHIVE_CPROFILE=0 pytest --lbench benchmarks/test_alert_archive.py -k per_band
-```
+## Benchmarks
 
-- `ALERT_ARCHIVE_CPROFILE=0` skips the lsdb-benchmarking default cProfile run (this is already specified for full runs via conftest override)
-- `--lbench` turns on lf-bench: it creates the run folder, enables pytest-benchmark and sets up the JSON output.
-- `-k per_band` runs only `test_per_band_counts`.
+`benchmarks/` holds timing benchmarks for common queries on the alert archive
+(all sources from one night, cone searches, light-curve aggregation, a Gaia
+crossmatch, and more), run with
+[lf-bench](https://github.com/lincc-frameworks/lsdb-benchmarking). They run
+nightly on S3DF via a cron job that benchmarks `main`, and you can also run
+them by hand or against a branch.
 
-Early in the output you'll see `[lbench] running benchmarks in .../lbench_results/<timestamp>`. That folder is where your results go. The test makes 7 full computes, so it takes a few minutes.
+See [benchmarks/README.md](benchmarks/README.md) for how to run them, where
+results are stored, and how to read them.
