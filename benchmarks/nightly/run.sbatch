@@ -17,9 +17,17 @@
 
 set -o pipefail
 
+# Make results and logs group-writable, so anyone in rubin_users can manage
+# them (see the umask comment in submit.sh).
+umask 0002
+
 base=$1
 repo=$base/alert-archive
 results=$3
+
+# Let git work in the shared clone even if another user created it (see the
+# safe.directory comment in submit.sh).
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=$repo
 
 # Pin the conda env rather than taking loadLSST.sh's default, which Rubin bumps.
 # lsst_distrib isn't set up; the benchmarks only need the venv's packages.

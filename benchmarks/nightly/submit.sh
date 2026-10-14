@@ -8,7 +8,7 @@
 #
 # Crontab line (run `crontab -e` on sdfcron001):
 #
-#   17 3 * * * /sdf/data/rubin/user/olynn/alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+#   17 3 * * * /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 #
 # Runs at 03:17 Pacific: overnight, when the cluster is quietest and preemption
 # is least likely, and off the hour, when many other cron jobs fire.
@@ -16,8 +16,9 @@
 # What it does:
 #   1. Resets the job's own clone of alert-archive to the requested branch on
 #      GitHub (main by default), so only pushed & committed work is benchmarked;
-#      never anyone's local checkout. This happens here, not in the Slurm job,
-#      because compute nodes have limited outbound network access.
+#      never anyone's local checkout. Clones it first if it doesn't exist yet.
+#      This happens here, not in the Slurm job, because compute nodes have
+#      limited outbound network access.
 #   2. Makes sure the venv with the pinned packages exists and matches
 #      benchmarks/nightly/requirements.txt, reinstalling when the pins change.
 #   3. Submits run.sbatch, which runs the benchmarks on a compute node.
@@ -42,9 +43,19 @@ main() {
     # (-u), and count a pipeline as failed if any part of it fails (pipefail).
     set -euo pipefail
 
-    # Root of everything the nightly job owns. Override with
-    # ALERT_ARCHIVE_NIGHTLY_BASE, e.g. to try the setup in a scratch location.
-    local base=${ALERT_ARCHIVE_NIGHTLY_BASE:-/sdf/data/rubin/user/olynn/alert_archive_benchmarks}
+    # Make everything this script and the job create (clone, venv, results,
+    # logs) writable by the group, so anyone in rubin_users can manage the
+    # shared folder, not only whoever's crontab runs this. The shared folder's
+    # setgid bit makes the group rubin_users. sbatch passes this umask on to
+    # the job; run.sbatch sets it too, so the job doesn't depend on that.
+    umask 0002
+
+    # Root of everything the nightly job owns. The default is the shared folder
+    # the nightly results are published in (readable by rubin_users). Override
+    # with ALERT_ARCHIVE_NIGHTLY_BASE to use your own folder, e.g. for branch
+    # runs if you can't write to the shared one (see "Handover" in
+    # benchmarks/README.md).
+    local base=${ALERT_ARCHIVE_NIGHTLY_BASE:-/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks}
 
     # LSST conda env the venv is layered on. Pinned (rather than whatever
     # loadLSST.sh defaults to) so a Rubin-side upgrade can't silently change
@@ -57,6 +68,14 @@ main() {
 
     local repo=$base/alert-archive
     local venv=$base/venv
+
+    # Git refuses to work in a repository owned by another user ("detected
+    # dubious ownership"), which the shared clone is for anyone but whoever
+    # created it. Mark it as safe. Setting this through the environment
+    # (rather than `git config`) covers every git command, including the ones
+    # in run.sbatch and pytest-benchmark's, without touching anyone's
+    # ~/.gitconfig. sbatch passes it on to the job.
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=$repo
     local logs=$base/logs
 
     # main's results go in results/; any other branch gets its own folder.
@@ -81,6 +100,12 @@ main() {
     # checkout --force --detach origin/<branch>: make the files match that
     # branch exactly, throwing away any local edits (--force), without creating
     # a local branch that would need keeping in sync (--detach).
+    # A new base folder has no clone yet, so make one first. This lets a fresh
+    # setup start by running submit.sh from any checkout of the repo.
+    if [[ ! -d $repo/.git ]]; then
+        log "cloning alert-archive into $repo"
+        git clone --quiet https://github.com/lincc-frameworks/alert-archive.git "$repo"
+    fi
     git -C "$repo" fetch --quiet origin
     git -C "$repo" checkout --quiet --force --detach "origin/$branch"
     log "alert-archive at $(git -C "$repo" rev-parse --short HEAD)"

@@ -99,11 +99,20 @@ The job runs on a whole `milano` node (RHEL 9.6) so timings are comparable
 night to night. It uses the preemptable QOS: if a higher-priority job needs
 the node, the run is cancelled and that night has no results.
 
-Everything lives under `/sdf/data/rubin/user/olynn/alert_archive_benchmarks/`
-(readable by `rubin_users`):
+Everything lives in a shared folder next to the alert archive itself:
 
 ```
-alert_archive_benchmarks/
+/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/
+```
+
+Everyone in `rubin_users` can read and write it. The nightly scripts make
+everything they create group-writable, so anyone in the group can run branch
+tests here, clean up, or take over the job (see [Handover](#handover)). The
+results are also copied nightly to another cluster that serves
+visualizations of them.
+
+```
+rubin_alert_archive_benchmarks/
 ├── alert-archive/       the job's clone; reset on every run, don't edit it
 ├── venv/                pinned packages from nightly/requirements.txt
 ├── results/             nightly results from main; one folder per run
@@ -121,9 +130,15 @@ packages), push it to GitHub, then on `sdfcron001`:
 
 ```bash
 ssh sdfcron001
-/sdf/data/rubin/user/olynn/alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh <branch>
+/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh <branch>
 ```
 
+Anyone in `rubin_users` can run this. The job uses the `rubin:default` Slurm
+account, so you need access to it.
+
+- **Check that no other run is in progress first**
+  (`squeue -n alert-archive-bench`). All runs share one clone, and starting
+  a new one resets it to your branch, under a run that's still using it.
 - The branch must be pushed; the script checks out `origin/<branch>`.
 - Results go to `results-<branch>/` (with `/` in the name replaced by `_`), so
   they stay separate from the nightly history.
@@ -136,7 +151,7 @@ ssh sdfcron001
 ### Checking on a run
 
 ```bash
-B=/sdf/data/rubin/user/olynn/alert_archive_benchmarks
+B=/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks
 tail $B/logs/cron.log                              # did submit.sh run, which commit, which job ID?
 squeue -u $USER                                    # PD = waiting for a node, R = running
 tail -f $B/logs/<jobid>.out                        # live output
@@ -151,6 +166,32 @@ A `FAILED at line N` entry in `cron.log` means `submit.sh` itself failed
 Edit `nightly/requirements.txt` and merge to `main`. The next nightly run
 reinstalls the venv. Version changes then line up with commits in this repo,
 so a jump in the results can be traced to them.
+
+### Handover
+
+The benchmark code lives in this repo, and the shared folder is writable by
+everyone in `rubin_users`. The one thing tied to a person is the cron entry:
+it lives in the owner's crontab on `sdfcron001`, and crontabs can't be
+shared. Current owner: Olivia Lynn (`olynn`).
+
+To take over:
+
+1. **Stop the old cron entry.** The previous owner runs `crontab -e` on
+   `sdfcron001` and deletes the line. Otherwise both entries run and the job
+   runs twice a night. If the previous owner's account is gone, so is their
+   crontab.
+2. **Add your own cron entry** with `crontab -e` on `sdfcron001`:
+   ```
+   17 3 * * * /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+   ```
+3. **Check the next morning** that it ran (see
+   [Checking on a run](#checking-on-a-run)), or run `submit.sh` once by hand
+   on `sdfcron001` to check right away.
+4. **Update the owner** named in this section, in a PR.
+
+If the shared folder is ever lost, `submit.sh` can rebuild everything except
+the results: run it with `ALERT_ARCHIVE_NIGHTLY_BASE` set to a new, empty
+folder, and it clones the repo, builds the venv, and submits a run.
 
 ## Reading results
 
