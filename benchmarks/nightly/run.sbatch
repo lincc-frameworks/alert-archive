@@ -38,8 +38,10 @@ export LSST_CONDA_ENV_NAME=$2
 # otherwise fail because it can't find them.
 # shellcheck source=/dev/null
 source /sdf/group/rubin/sw/loadLSST.sh
+# Stop if the venv is missing or broken, rather than running the benchmarks
+# with the LSST env's packages instead of the pinned ones.
 # shellcheck source=/dev/null
-source "$base/venv/bin/activate"
+source "$base/venv/bin/activate" || exit 1
 
 # Ignore ~/.local (pip --user installs, e.g. an editable ~/lsdb). A venv made
 # with --system-site-packages would otherwise still import from there.
