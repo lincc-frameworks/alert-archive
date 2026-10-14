@@ -70,11 +70,8 @@ def run_lbench(pytester, monkeypatch, *, cprofile):
 def test_results_json_is_written(pytester, monkeypatch):
     """``--lbench`` writes a non-empty, valid pytest-benchmark.json.
 
-    lf-bench used to leave this file empty, because it handed pytest-benchmark
-    an open file where pytest-benchmark >= 5.3.0 expects a path. The
-    ``pytest_configure`` hook in benchmarks/conftest.py works around that. This
-    test checks the end result, so it keeps passing once lf-bench is fixed and
-    the workaround is removed.
+    Older lf-bench left this file empty with pytest-benchmark >= 5.3.0
+    (fixed in lsdb-benchmarking#20); this guards against that coming back.
     """
     json_path, _ = run_lbench(pytester, monkeypatch, cprofile=False)
 

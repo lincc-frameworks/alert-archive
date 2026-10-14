@@ -1,6 +1,5 @@
 """Shared fixtures for the alert archive benchmarks."""
 
-import contextlib
 import os
 
 import lsdb
@@ -10,27 +9,6 @@ from lbench.runner import run_cprofile, run_memray
 
 # Default to the catalog store on the HPC; override with ALERT_ARCHIVE_CATALOG_DIR.
 # DEFAULT_CATALOG_DIR = "/astro/store/shire/hats/catalogs"
-
-
-@pytest.hookimpl(trylast=True)
-def pytest_configure(config):
-    """Work around lf-bench handing pytest-benchmark a file handle instead of a path.
-
-    lf-bench's ``--lbench`` setup assigns an open file object to
-    ``config.option.benchmark_json``; pytest-benchmark >= 5.3.0 caches that into its
-    session and then calls ``open()`` on it at finish, crashing before any
-    results are written. Patch the live session's ``json`` attribute to the
-    handle's path so the results JSON is saved. Runs ``trylast`` so
-    pytest-benchmark's session already exists. Remove once lf-bench passes a path.
-    """
-    session = getattr(config, "_benchmarksession", None)
-    handle = getattr(session, "json", None)
-    if handle is not None and hasattr(handle, "write"):
-        path = getattr(handle, "name", None)
-        with contextlib.suppress(OSError):
-            handle.close()
-        if path:
-            session.json = path
 
 
 # @pytest.fixture(scope="session")

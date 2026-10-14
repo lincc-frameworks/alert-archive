@@ -80,9 +80,7 @@ or combine names in `-k`, e.g. `-k "per_band or per_night"`.
 Changing the worker count changes the timings, so results with different
 worker counts aren't comparable.
 
-> **Note:** Use `LBENCH_ROOT` rather than lf-bench's `--lbench-root` option, which
-crashes at startup in the currently pinned lf-bench version.  
-> *(This warning can be removed once https://github.com/lincc-frameworks/lsdb-benchmarking/pull/21 is merged!)*
+lf-bench's `--lbench-root <dir>` option does the same as `LBENCH_ROOT`.
 
 ## Nightly runs
 
@@ -261,10 +259,7 @@ Things this means for interpreting results:
 
 ## Known issues
 
-- `conftest.py`'s `pytest_configure` works around an lf-bench bug that left
-  `pytest-benchmark.json` empty with pytest-benchmark ≥ 5.3.0. Once the
-  upstream fix is merged, bump lf-bench in `nightly/requirements.txt` and
-  delete the workaround.
 - A run that's interrupted (Ctrl-C, preemption, timeout) leaves a run folder
-  with an empty `pytest-benchmark.json`. That's expected; check `sacct` or the
-  job's `.out` file to see what happened.
+  with no `pytest-benchmark.json`, because results are only written at the
+  end. That's expected; check `sacct` or the job's `.out` file to see what
+  happened.

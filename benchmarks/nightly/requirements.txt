@@ -6,6 +6,6 @@ lsdb==0.11.0
 hats==0.11.0
 nested-pandas==0.7.2
 pytest-benchmark==5.3.0
-# lsdb-benchmarking main as of 2026-10-12. Bump to the merge commit of the
-# --benchmark-json fix to drop the pytest_configure workaround in conftest.py.
-lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking@a214c4aa71baa1819a661cbffc1a5fb3672a0220
+# lsdb-benchmarking main as of 2026-10-14, with the --benchmark-json (#20)
+# and --lbench-root (#21) fixes.
+lf-bench @ git+https://github.com/lincc-frameworks/lsdb-benchmarking@605bd6fedfdc592e7ff3249bf06db0715f13587e
