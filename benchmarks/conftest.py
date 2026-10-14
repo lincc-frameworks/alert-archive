@@ -7,16 +7,6 @@ import pytest
 from dask.distributed import Client, LocalCluster
 from lbench.runner import run_cprofile, run_memray
 
-# Default to the catalog store on the HPC; override with ALERT_ARCHIVE_CATALOG_DIR.
-# DEFAULT_CATALOG_DIR = "/astro/store/shire/hats/catalogs"
-
-
-# @pytest.fixture(scope="session")
-# def catalog_dir():
-#     """Root directory holding the HATS catalogs."""
-#     return Path(os.environ.get("ALERT_ARCHIVE_CATALOG_DIR", DEFAULT_CATALOG_DIR))
-
-
 ALERT_ARCHIVE_PATH = "/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive"
 GAIA_PATH = "/sdf/data/rubin/cosmicdata/lsdb/gaia_dr3"
 
@@ -31,7 +21,6 @@ def alert_archive():
     fields). Each benchmark passes the columns it needs; nested sub-columns
     use dot notation, e.g. ``"diaSource.band"``.
     """
-    # return lsdb.open_catalog(catalog_dir / "rubin_alert_archive")
     return lambda columns: lsdb.open_catalog(ALERT_ARCHIVE_PATH, columns=columns)
 
 
@@ -41,7 +30,6 @@ def gaia():
 
     Gaia has 152 columns and no ``default_columns``, so always select a subset.
     """
-    # return lsdb.open_catalog(catalog_dir / "gaia_dr3")
     return lambda columns: lsdb.open_catalog(GAIA_PATH, columns=columns)
 
 
