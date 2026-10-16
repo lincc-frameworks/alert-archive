@@ -97,6 +97,11 @@ The job runs on a whole `milano` node (RHEL 9.6) so timings are comparable
 night to night. It uses the preemptable QOS: if a higher-priority job needs
 the node, the run is cancelled and that night has no results.
 
+If a run fails or hits its time limit, Slurm emails the job's owner (the
+`--mail-user` address in `nightly/run.sbatch`). That covers branch runs too,
+whoever starts them. Failures in `submit.sh` itself, before a job is
+submitted, don't send email; they only show up in `logs/cron.log`.
+
 Everything lives in a shared folder next to the alert archive itself:
 
 ```
@@ -185,7 +190,9 @@ To take over:
 3. **Check the next morning** that it ran (see
    [Checking on a run](#checking-on-a-run)), or run `submit.sh` once by hand
    on `sdfcron001` to check right away.
-4. **Update the owner** named in this section, in a PR.
+4. **Update the repo** in a PR: (1) the owner named in this section, and (2) the
+   `--mail-user` address at the top of `nightly/run.sbatch`, which gets an
+   email from Slurm whenever a run fails or hits its time limit.
 
 If the shared folder is ever lost, `submit.sh` can rebuild everything except
 the results: run it with `ALERT_ARCHIVE_NIGHTLY_BASE` set to a new, empty

@@ -6,6 +6,10 @@
 # Runs on a whole milano node (RHEL 9.6) so timings stay comparable night to
 # night. Preemptable: if preempted, the run is cancelled and that night has no
 # results (sacct shows PREEMPTED).
+#
+# Slurm emails the owner of the nightly job (see "Handover" in
+# benchmarks/README.md) if a run fails or hits the time limit. Every run of
+# this script emails that address, including other people's branch runs.
 #SBATCH --job-name=alert-archive-bench
 #SBATCH --account=rubin:default
 #SBATCH --partition=milano
@@ -14,6 +18,8 @@
 #SBATCH --exclusive
 #SBATCH --mem=0
 #SBATCH --time=02:00:00
+#SBATCH --mail-user=olynn@andrew.cmu.edu
+#SBATCH --mail-type=FAIL,TIME_LIMIT
 
 set -o pipefail
 
