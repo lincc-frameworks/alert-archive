@@ -102,52 +102,105 @@ If a run fails or hits its time limit, Slurm emails the job's owner (the
 whoever starts them. Failures in `submit.sh` itself, before a job is
 submitted, don't send email; they only show up in `logs/cron.log`.
 
-Everything lives in a shared folder next to the alert archive itself:
+Files live in two places, split by who may write them:
 
 ```
 /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/
-```
-
-Everyone in `rubin_users` can read and write it. The nightly scripts make
-everything they create group-writable, so anyone in the group can run branch
-tests here, clean up, or take over the job (see [Handover](#handover)). The
-results are also copied nightly to another cluster that serves
-visualizations of them.
-
-```
-rubin_alert_archive_benchmarks/
-├── alert-archive/       the job's clone; reset on every run, don't edit it
-├── venv/                pinned packages from nightly/requirements.txt
 ├── results/             nightly results from main; one folder per run
 ├── results-<branch>/    results from branch runs
 └── logs/
-    ├── cron.log         one line per step of each submit.sh run
-    ├── pip.log          output of venv (re)installs
+    ├── cron.log         one line per step of each submit.sh run, by anyone
     └── <jobid>.out      output of each Slurm job
+
+/sdf/data/rubin/user/<owner>/rubin_alert_archive_benchmarks/
+├── alert-archive/       the job's clone; reset on every run, don't edit it
+├── venv/                pinned packages from nightly/requirements.txt
+└── pip.log              output of venv (re)installs
 ```
+
+- **Results and logs** are in a shared folder next to the alert archive
+  itself. Everyone in `rubin_users` can read and write them, so anyone can
+  look at or clean up results. The results are also copied nightly to another
+  cluster that serves visualizations of them.
+- **The clone and venv** are in a private folder, one per person who runs
+  `submit.sh`, writable only by that person. They're the code the job runs,
+  under the account of whoever started it; if anyone else could edit them,
+  they could run their own code under that account. `submit.sh` creates both
+  automatically on its first run, so there's nothing to set up by hand.
+
+`ALERT_ARCHIVE_NIGHTLY_SHARED` and `ALERT_ARCHIVE_NIGHTLY_BASE` override the
+two locations.
+
+How the pieces connect. `base` and `shared` are the names `submit.sh` uses
+for the private and shared folders:
+
+```mermaid
+flowchart TD
+    cron["cron on sdfcron001<br/>(owner's crontab, 03:17)"]
+    person["someone, by hand<br/>(branch test)"]
+    submit["submit.sh<br/>(runs on sdfcron001)"]
+    slurm["Slurm queue<br/>(whole milano node, preemptable)"]
+    job["run.sbatch → pytest --lbench<br/>(runs on a compute node)"]
+    data[("alert archive +<br/>Gaia catalogs")]
+    viz["visualization cluster"]
+
+    subgraph GH["GitHub / PyPI"]
+        gh_repo["alert-archive repo"]
+        gh_pkgs["pinned packages"]
+    end
+
+    subgraph BASE["base: private, one per person<br/>/sdf/data/rubin/user/$USER/rubin_alert_archive_benchmarks"]
+        clone["alert-archive/<br/>(the job's clone)"]
+        venv["venv/"]
+    end
+
+    subgraph SHARED["shared: rubin_users can write<br/>/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks"]
+        results["results/<br/>results-branch/"]
+        logs["logs/"]
+    end
+
+    cron --> submit
+    person --> submit
+    gh_repo -- "git fetch + checkout<br/>(by submit.sh)" --> clone
+    gh_pkgs -- "pip install, if pins changed<br/>(by submit.sh)" --> venv
+    submit -- "sbatch" --> slurm --> job
+    submit -. "cron.log" .-> logs
+    clone -- "tests, conftest" --> job
+    venv -- "packages" --> job
+    data -- "reads" --> job
+    job -- "JSON, Dask reports,<br/>versions.txt" --> results
+    job -. "job output" .-> logs
+    results -- "nightly copy" --> viz
+```
+
+Solid arrows are the main flow; dotted arrows are logs. Everything in `base`
+is code the job runs, so only its owner can change it; everything in
+`shared` is output.
 
 ### Running a branch the way the nightly job does
 
 To benchmark a branch on the nightly setup (same hardware, same pinned
-packages), push it to GitHub, then on `sdfcron001`:
+packages), push it to GitHub, then on `sdfcron001`, run `submit.sh` from your
+own checkout of this repo:
 
 ```bash
 ssh sdfcron001
-/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh <branch>
+~/alert-archive/benchmarks/nightly/submit.sh <branch>
 ```
 
-Anyone in `rubin_users` can run this. The job uses the `rubin:default` Slurm
-account, so you need access to it.
+Anyone in `rubin_users` can run this. The first time, it creates your private
+clone and venv (a few minutes); after that it reuses them. The job uses the
+`rubin:default` Slurm account, so you need access to it.
 
-- **Check that no other run is in progress first**
-  (`squeue -n alert-archive-bench`). All runs share one clone, and starting
-  a new one resets it to your branch, under a run that's still using it.
 - The branch must be pushed; the script checks out `origin/<branch>`.
-- Results go to `results-<branch>/` (with `/` in the name replaced by `_`), so
-  they stay separate from the nightly history.
+- Results go to the shared `results-<branch>/` (with `/` in the name replaced
+  by `_`), so they stay separate from the nightly history.
 - With no argument, `submit.sh` benchmarks `main`, the same as the cron job.
-- If the branch changes `nightly/requirements.txt`, the shared venv is
-  reinstalled with its pins. The next run from `main` puts `main`'s pins back.
+- Don't start a run while one of your own is still queued or running
+  (`squeue -u $USER`): your runs share your clone, and a new run resets it
+  under the old one.
+- If the branch changes `nightly/requirements.txt`, your venv is reinstalled
+  with its pins. Your next run from `main` puts `main`'s pins back.
 - Changes to `submit.sh` itself take effect one run after they're pushed:
   the script reads its own code before it fetches the new version.
 
@@ -162,7 +215,8 @@ sacct -j <jobid> -o JobID,State,Elapsed,MaxRSS     # COMPLETED / FAILED / PREEMP
 ```
 
 A `FAILED at line N` entry in `cron.log` means `submit.sh` itself failed
-(e.g. a git or pip problem); check `pip.log` for install errors.
+(e.g. a git or pip problem). Each line names who ran it; for install errors,
+check `pip.log` in that person's private folder.
 
 ### Changing pinned versions
 
@@ -172,10 +226,11 @@ so a jump in the results can be traced to them.
 
 ### Handover
 
-The benchmark code lives in this repo, and the shared folder is writable by
-everyone in `rubin_users`. The one thing tied to a person is the cron entry:
-it lives in the owner's crontab on `sdfcron001`, and crontabs can't be
-shared. Current owner: Olivia Lynn (`olynn`).
+The benchmark code lives in this repo, and the results and logs are in the
+shared folder, so neither depends on one person. What's tied to the owner is
+the cron entry (in their crontab on `sdfcron001`; crontabs can't be shared)
+and their private clone and venv, which the new owner doesn't need: their
+first run builds their own. Current owner: Olivia Lynn (`olynn`).
 
 To take over:
 
@@ -183,20 +238,24 @@ To take over:
    `sdfcron001` and deletes the line. Otherwise both entries run and the job
    runs twice a night. If the previous owner's account is gone, so is their
    crontab.
-2. **Add your own cron entry** with `crontab -e` on `sdfcron001`:
+2. **Run it once by hand** on `sdfcron001`, from your own checkout:
+   ```bash
+   ssh sdfcron001
+   ~/alert-archive/benchmarks/nightly/submit.sh
    ```
-   17 3 * * * /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+   This creates your private clone and venv, and submits a run of `main`
+   (see [Checking on a run](#checking-on-a-run)).
+3. **Add your own cron entry** with `crontab -e` on `sdfcron001`, pointing
+   at the clone the first run created (`<you>` is your username):
    ```
-3. **Check the next morning** that it ran (see
-   [Checking on a run](#checking-on-a-run)), or run `submit.sh` once by hand
-   on `sdfcron001` to check right away.
+   17 3 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+   ```
 4. **Update the repo** in a PR: (1) the owner named in this section, and (2) the
    `--mail-user` address at the top of `nightly/run.sbatch`, which gets an
    email from Slurm whenever a run fails or hits its time limit.
 
-If the shared folder is ever lost, `submit.sh` can rebuild everything except
-the results: run it with `ALERT_ARCHIVE_NIGHTLY_BASE` set to a new, empty
-folder, and it clones the repo, builds the venv, and submits a run.
+The previous owner's private folder can be deleted once the new setup works;
+only they (or an admin) can delete it.
 
 ## Reading results
 

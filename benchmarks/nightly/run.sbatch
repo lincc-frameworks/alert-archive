@@ -23,17 +23,16 @@
 
 set -o pipefail
 
-# Make results and logs group-writable, so anyone in rubin_users can manage
-# them (see the umask comment in submit.sh).
+# The job only writes results (into the shared folder), so make them
+# group-writable, so anyone in rubin_users can manage them. Don't write .pyc
+# files: they'd be created group-writable next to the clone's code, where
+# someone else could change what runs under this account.
 umask 0002
+export PYTHONDONTWRITEBYTECODE=1
 
 base=$1
 repo=$base/alert-archive
 results=$3
-
-# Let git work in the shared clone even if another user created it (see the
-# safe.directory comment in submit.sh).
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=$repo
 
 # Pin the conda env rather than taking loadLSST.sh's default, which Rubin bumps.
 # lsst_distrib isn't set up; the benchmarks only need the venv's packages.

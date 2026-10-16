@@ -6,9 +6,9 @@
 #   submit.sh            # benchmark origin/main; what cron runs every night
 #   submit.sh <branch>   # benchmark origin/<branch> instead, for testing
 #
-# Crontab line (run `crontab -e` on sdfcron001):
+# Crontab line (run `crontab -e` on sdfcron001; <you> is your username):
 #
-#   17 3 * * * /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+#   17 3 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 #
 # Runs at 03:17 Pacific: overnight, when the cluster is quietest and preemption
 # is least likely, and off the hour, when many other cron jobs fire.
@@ -23,15 +23,24 @@
 #      benchmarks/nightly/requirements.txt, reinstalling when the pins change.
 #   3. Submits run.sbatch, which runs the benchmarks on a compute node.
 #
-# Layout under $base:
-#   alert-archive/      the job's clone; reset on every run, never edit by hand
-#   venv/               pinned lsdb, hats, lf-bench, ... (see requirements.txt)
-#   results/            nightly results from main; one lbench run dir per night
-#   results-<branch>/   results from test runs of other branches, kept apart so
-#                       they don't mix into the nightly history
-#   logs/cron.log       one line per step of every submit.sh run
-#   logs/pip.log        output of venv (re)installs
-#   logs/<jobid>.out    output of each Slurm job
+# Files live in two places, split by who may write them:
+#
+#   $base (private, per person; only its owner can write):
+#     alert-archive/      the job's clone; reset on every run, never edit by hand
+#     venv/               pinned lsdb, hats, lf-bench, ... (see requirements.txt)
+#     pip.log             output of venv (re)installs
+#
+#   $shared (writable by everyone in rubin_users):
+#     results/            nightly results from main; one lbench run dir per night
+#     results-<branch>/   results from test runs of other branches, kept apart so
+#                         they don't mix into the nightly history
+#     logs/cron.log       one line per step of every submit.sh run, by anyone
+#     logs/<jobid>.out    output of each Slurm job
+#
+# The clone and venv are code that runs as whoever runs this script, so they
+# must not be writable by anyone else: otherwise another user could edit them
+# and have their code run under your account. Only results and logs, which are
+# data, are shared.
 #
 # This script lives inside the clone that step 1 resets. Bash reads a script
 # from disk as it runs it, so if git changed this file mid-run, bash could run
@@ -43,19 +52,23 @@ main() {
     # (-u), and count a pipeline as failed if any part of it fails (pipefail).
     set -euo pipefail
 
-    # Make everything this script and the job create (clone, venv, results,
-    # logs) writable by the group, so anyone in rubin_users can manage the
-    # shared folder, not only whoever's crontab runs this. The shared folder's
-    # setgid bit makes the group rubin_users. sbatch passes this umask on to
-    # the job; run.sbatch sets it too, so the job doesn't depend on that.
-    umask 0002
+    # Files this script creates are writable only by their owner (the clone
+    # and venv in particular). Writes to the shared folder below opt in to
+    # group write explicitly.
+    umask 0022
 
-    # Root of everything the nightly job owns. The default is the shared folder
-    # the nightly results are published in (readable by rubin_users). Override
-    # with ALERT_ARCHIVE_NIGHTLY_BASE to use your own folder, e.g. for branch
-    # runs if you can't write to the shared one (see "Handover" in
-    # benchmarks/README.md).
-    local base=${ALERT_ARCHIVE_NIGHTLY_BASE:-/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks}
+    local user
+    user=$(id -un)
+
+    # Private folder for the clone and venv. Defaults to one per person, so
+    # everyone who runs this (the nightly owner, or anyone testing a branch)
+    # gets their own. Override with ALERT_ARCHIVE_NIGHTLY_BASE.
+    local base=${ALERT_ARCHIVE_NIGHTLY_BASE:-/sdf/data/rubin/user/$user/rubin_alert_archive_benchmarks}
+
+    # Shared folder for results and logs (readable and writable by
+    # rubin_users). Override with ALERT_ARCHIVE_NIGHTLY_SHARED, e.g. to try
+    # the setup without writing to the real results.
+    local shared=${ALERT_ARCHIVE_NIGHTLY_SHARED:-/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks}
 
     # LSST conda env the venv is layered on. Pinned (rather than whatever
     # loadLSST.sh defaults to) so a Rubin-side upgrade can't silently change
@@ -68,44 +81,42 @@ main() {
 
     local repo=$base/alert-archive
     local venv=$base/venv
-
-    # Git refuses to work in a repository owned by another user ("detected
-    # dubious ownership"), which the shared clone is for anyone but whoever
-    # created it. Mark it as safe. Setting this through the environment
-    # (rather than `git config`) covers every git command, including the ones
-    # in run.sbatch and pytest-benchmark's, without touching anyone's
-    # ~/.gitconfig. sbatch passes it on to the job.
-    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=$repo
-    local logs=$base/logs
+    local logs=$shared/logs
 
     # main's results go in results/; any other branch gets its own folder.
     # Slashes in branch names (e.g. user/feature) become underscores so the
     # name works as a single directory name.
-    local results=$base/results
+    local results=$shared/results
     if [[ $branch != main ]]; then
-        results=$base/results-${branch//\//_}
+        results=$shared/results-${branch//\//_}
     fi
-    mkdir -p "$logs" "$results"
 
-    # Append a timestamped line to cron.log. Cron doesn't show output anywhere
-    # by default, so this log is how to see what happened on a given night.
-    log() { echo "$(date -Is) [$branch] $*" >> "$logs/cron.log"; }
+    mkdir -p "$base"
+    # In the shared folder, create folders and log files group-writable
+    # (umask 0002, in a subshell so it doesn't apply to anything else), so
+    # teammates can clean up and their own runs can append to cron.log.
+    (umask 0002 && mkdir -p "$logs" "$results")
+
+    # Append a timestamped line to cron.log, tagged with who ran it and which
+    # branch. Cron doesn't show output anywhere by default, so this log is how
+    # to see what happened on a given night.
+    log() { (umask 0002 && echo "$(date -Is) [$user $branch] $*" >> "$logs/cron.log"); }
 
     # If any command fails (and set -e is about to stop the script), record
     # where, so a missing night's results can be traced back to this step.
-    trap 'log "FAILED at line $LINENO; see $logs/cron.log and $logs/pip.log"' ERR
+    trap 'log "FAILED at line $LINENO; see $logs/cron.log and $base/pip.log"' ERR
 
     # --- 1. Update the clone ------------------------------------------------
-    # fetch: download the latest commits from GitHub without changing files.
-    # checkout --force --detach origin/<branch>: make the files match that
-    # branch exactly, throwing away any local edits (--force), without creating
-    # a local branch that would need keeping in sync (--detach).
     # A new base folder has no clone yet, so make one first. This lets a fresh
     # setup start by running submit.sh from any checkout of the repo.
     if [[ ! -d $repo/.git ]]; then
         log "cloning alert-archive into $repo"
         git clone --quiet https://github.com/lincc-frameworks/alert-archive.git "$repo"
     fi
+    # fetch: download the latest commits from GitHub without changing files.
+    # checkout --force --detach origin/<branch>: make the files match that
+    # branch exactly, throwing away any local edits (--force), without creating
+    # a local branch that would need keeping in sync (--detach).
     git -C "$repo" fetch --quiet origin
     git -C "$repo" checkout --quiet --force --detach "origin/$branch"
     log "alert-archive at $(git -C "$repo" rev-parse --short HEAD)"
@@ -135,14 +146,14 @@ main() {
     # stamp doesn't exist yet (first run).
     if ! cmp -s "$reqs" "$stamp"; then
         log "requirements changed; reinstalling venv packages"
-        "$venv/bin/pip" install -r "$reqs" >> "$logs/pip.log" 2>&1
+        "$venv/bin/pip" install -r "$reqs" >> "$base/pip.log" 2>&1
         # Only written after pip succeeds, so a failed install is retried on
         # the next run instead of being treated as done.
         cp "$reqs" "$stamp"
     fi
-    # Note: testing a branch with different pins reinstalls the shared venv
-    # with that branch's pins. The next run from main sees that the file
-    # differs and reinstalls main's pins, so nightly results stay on them.
+    # Note: testing a branch with different pins reinstalls your venv with
+    # that branch's pins. The next run from main sees that the file differs
+    # and reinstalls main's pins, so nightly results stay on them.
 
     # --- 3. Submit the job --------------------------------------------------
     # --parsable makes sbatch print just the job ID, for the log.
