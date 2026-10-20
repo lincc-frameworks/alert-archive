@@ -57,6 +57,14 @@ main() {
     # group write explicitly.
     umask 0022
 
+    # Cron runs this with a minimal PATH (/sbin:/bin:/usr/sbin:/usr/bin, from
+    # /etc/crontab). Login shells on S3DF add Slurm's commands via
+    # /etc/profile.d/slurm.sh (`module load slurm`), but cron skips that, so
+    # sbatch isn't found. Add Slurm's bin directory when it's missing.
+    if ! command -v sbatch > /dev/null; then
+        PATH=/opt/slurm/slurm-curr/bin:$PATH
+    fi
+
     local user
     user=$(id -un)
 
@@ -101,6 +109,13 @@ main() {
     # branch. Cron doesn't show output anywhere by default, so this log is how
     # to see what happened on a given night.
     log() { (umask 0002 && echo "$(date -Is) [$user $branch] $*" >> "$logs/cron.log"); }
+
+    # Also copy error messages from the commands below (git, sbatch, ...) into
+    # cron.log, so the reason for a failure is logged next to the FAILED line.
+    # Under cron, stderr otherwise only goes to cron's mail. tee keeps them on
+    # the terminal too when this is run by hand.
+    (umask 0002 && touch "$logs/cron.log")
+    exec 2> >(tee -a "$logs/cron.log" >&2)
 
     # If any command fails (and set -e is about to stop the script), record
     # where, so a missing night's results can be traced back to this step.
