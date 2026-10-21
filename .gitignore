@@ -151,3 +151,6 @@ _html/
 
 # Project initialization script
 .initialize_new_project.sh
+
+# Rsync logs
+benchmarks/nightly/rsync-bench.log

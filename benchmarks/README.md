@@ -4,7 +4,9 @@ This directory holds timing benchmarks for common queries on the Rubin alert
 archive HATS catalog, run with 
 [lf-bench](https://github.com/lincc-frameworks/lsdb-benchmarking) (`lbench`), a pytest plugin built on [pytest-benchmark](https://pytest-benchmark.readthedocs.io/). 
 
-They run nightly on S3DF, and you can also run them by hand.
+They run nightly on S3DF, with results published at
+[alert-dashboard.lsdb.io](https://alert-dashboard.lsdb.io), and you can also
+run them by hand.
 
 | File | What it is |
 |---|---|
@@ -14,6 +16,7 @@ They run nightly on S3DF, and you can also run them by hand.
 | `nightly/submit.sh` | Nightly cron entry point: updates the job's clone, checks the venv, submits the Slurm job |
 | `nightly/run.sbatch` | The Slurm job that runs the benchmarks |
 | `nightly/requirements.txt` | Pinned lsdb, hats, lf-bench, … versions for nightly runs |
+| `nightly/rsync-bench.sh` | Copies the nightly results to the dashboard; run by a second cron job |
 
 ## Running benchmarks by hand
 
@@ -110,6 +113,7 @@ Files live in two places, split by who may write them:
 ├── results-<branch>/    results from branch runs
 └── logs/
     ├── cron.log         one line per step of each submit.sh run, by anyone
+    ├── rsync-bench.log  output of each rsync to the dashboard
     └── <jobid>.out      output of each Slurm job
 
 /sdf/data/rubin/user/<owner>/rubin_alert_archive_benchmarks/
@@ -120,8 +124,9 @@ Files live in two places, split by who may write them:
 
 - **Results and logs** are in a shared folder next to the alert archive
   itself. Everyone in `rubin_users` can read and write them, so anyone can
-  look at or clean up results. The results are also copied nightly to another
-  cluster that serves visualizations of them.
+  look at or clean up results. The nightly results are also copied every
+  morning to a machine at CMU that serves them at alert-dashboard.lsdb.io
+  (see [Publishing to the dashboard](#publishing-to-the-dashboard)).
 - **The clone and venv** are in a private folder, one per person who runs
   `submit.sh`, writable only by that person. They're the code the job runs,
   under the account of whoever started it; if anyone else could edit them,
@@ -142,7 +147,7 @@ flowchart TD
     slurm["Slurm queue<br/>(whole milano node, preemptable)"]
     job["run.sbatch → pytest --lbench<br/>(runs on a compute node)"]
     data[("alert archive +<br/>Gaia catalogs")]
-    viz["visualization cluster"]
+    viz["visualization dashboard<br/>(alert-dashboard.lsdb.io)"]
 
     subgraph GH["GitHub / PyPI"]
         gh_repo["alert-archive repo"]
@@ -170,7 +175,7 @@ flowchart TD
     data -- "reads" --> job
     job -- "JSON, Dask reports,<br/>versions.txt" --> results
     job -. "job output" .-> logs
-    results -- "nightly copy" --> viz
+    results -- "rsync (daily at 05:00)" --> viz
 ```
 
 Solid arrows are the main flow; dotted arrows are logs. Everything in `base`
@@ -228,6 +233,38 @@ env -i HOME=$HOME PATH=/sbin:/bin:/usr/sbin:/usr/bin \
     /sdf/data/rubin/user/$USER/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 ```
 
+### Publishing to the dashboard
+
+[alert-dashboard.lsdb.io](https://alert-dashboard.lsdb.io) runs the
+[lsdb-benchmarking dashboard](https://github.com/lincc-frameworks/lsdb-benchmarking)
+on a machine at CMU (lsdb.phys.cmu.edu). A second cron job copies the nightly
+results there every day at 05:00 Pacific, from a crontab on `sdfcron001`.
+Current owner: Sandro (`stavar`).
+
+```bash
+0 5 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
+```
+
+Cron runs `nightly/rsync-bench.sh` from the owner's clone of this repo. The
+script runs rsync over SSH, logging in to the CMU machine as its `benchmarks`
+user with a key kept on USDF. It syncs the contents of the shared `results/`
+folder into a volume mounted on the dashboard's Docker container.
+
+- **What lands in `results/` gets published.** Only the results for main
+  get copied. Do not include sensitive information in this folder, as its
+  contents will be made public.
+- **New runs show up the morning after.** 05:00 leaves time for the run
+  submitted at 03:17 to finish. If a run takes longer, it will be published
+  the next day. The dashboard rereads the results on every page load, so
+  nothing needs restarting on the server.
+
+The script logs each rsync result to `nightly/rsync-bench.log` in the owner's
+clone (gitignored), and at the end of each run replaces `logs/rsync-bench.log`
+in the shared folder with a copy of it, which people in the `rubin_users` group
+can read and write to. It doesn't append to `logs/rsync-bench.log` directly,
+because anyone in `rubin_users` could replace it with a link to one of the owner's
+files and have the cron job write there.
+
 ### Changing pinned versions
 
 Edit `nightly/requirements.txt` and merge to `main`. The next nightly run
@@ -266,6 +303,32 @@ To take over:
 
 The previous owner's private folder can be deleted once the new setup works;
 only they (or an admin) can delete it.
+
+To take over the rsync of results to the dashboard:
+
+1. **Stop the old cron entry.** The previous owner runs `crontab -e` on
+   `sdfcron001` and deletes the line.
+2. **Get access to the CMU machine.** Make an SSH key without a passphrase,
+   and have someone with access to the CMU machine add its public key to
+   `~benchmarks/.ssh/authorized_keys` there. Then connect once by hand,
+   to accept the machine's host key:
+   ```bash
+   ssh benchmarks@lsdb.phys.cmu.edu true
+   ```
+3. **Keep the previous owner's log.** Your runs replace the shared log with a
+   copy of your own, so rename theirs first:
+   ```bash
+   cd /sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_benchmarks/logs
+   mv rsync-bench.log rsync-bench-<previous-owner>.log
+   ```
+4. Clone this repo, and keep it on main:
+   ```bash
+   git clone https://github.com/lincc-frameworks/alert-archive.git $HOME/alert-archive
+   ```
+5. **Add your own cron entry** with `crontab -e` on `sdfcron001`:
+   ```bash
+   0 5 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
+   ```
 
 ## Reading results
 
