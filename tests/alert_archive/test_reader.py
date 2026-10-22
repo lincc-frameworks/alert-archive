@@ -5,10 +5,9 @@ import nested_pandas as npd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
+from alert_archive.reader import AlertReader, transform_alerts
 from dask.distributed import Client
 from hats_import import ImportArguments, pipeline_with_client
-
-from alert_archive.reader import AlertReader, transform_alerts
 
 NESTED_COLUMNS = ["diaSource", "prvDiaSources", "prvDiaForcedSources", "diaObject"]
 
