@@ -72,7 +72,7 @@ def test_keeps_solar_system_alerts(alert_sample_pq_path, raw_alerts):
     object_ids = pc.list_flatten(pc.struct_field(table["diaSource"], "diaObjectId")).to_pylist()
     ss_ids = pc.list_flatten(pc.struct_field(table["diaSource"], "ssObjectId")).to_pylist()
 
-    output_ss_ids = [ss for obj, ss in zip(object_ids, ss_ids) if obj == 0]
+    output_ss_ids = [ss for obj, ss in zip(object_ids, ss_ids, strict=True) if obj == 0]
 
     all_raw_ss_ids = pc.struct_field(raw_alerts["diaSource"], "ssObjectId").to_pylist()
     raw_ss_ids = [ss for ss in all_raw_ss_ids if ss != 0]
@@ -111,6 +111,20 @@ def test_read_columns_mixed(alert_sample_pq_path):
     )
     assert table.column_names == ["diaSourceId", "ra", "diaSource"]
     assert_tables_equal(table, read_all(alert_sample_pq_path).select(["diaSourceId", "ra", "diaSource"]))
+
+
+@pytest.mark.parametrize("column_names", [["diaSource"], ["ra", "diaSource"], ["dec"]])
+def test_column_names_without_coordinates_raises(column_names):
+    """column_names, if given, must include ra and dec, or hats-import's splitting stage fails."""
+    with pytest.raises(ValueError, match="coordinate columns"):
+        AlertReader(column_names=column_names)
+
+
+def test_column_names_with_coordinates(alert_sample_pq_path):
+    """With ra and dec included, column_names selects the output columns."""
+    reader = AlertReader(column_names=["ra", "dec", "diaSource"])
+    table = pa.concat_tables(reader.read(alert_sample_pq_path))
+    assert table.column_names == ["ra", "dec", "diaSource"]
 
 
 def test_drops_cutouts(raw_alerts):

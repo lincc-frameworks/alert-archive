@@ -30,7 +30,35 @@ class AlertReader(ParquetPyarrowReader):
 
     Takes the same arguments as
     :class:`hats_import.catalog.file_readers.ParquetPyarrowReader`.
+
+    Parameters
+    ----------
+    column_names : list[str] or None
+        Output columns to return. If None (the default), all columns are
+        returned. If given, it must include ``ra`` and ``dec``: hats-import
+        places each alert on the sky by them, and without them the import
+        fails partway through, after reading every input file once.
+
+    Raises
+    ------
+    ValueError
+        If ``column_names`` is given without ``ra`` and ``dec``.
     """
+
+    def __init__(self, chunksize=500_000, column_names=None, iterate_by_row_groups=False, **kwargs):
+        if column_names is not None:
+            missing = [c for c in COORDINATE_COLUMNS if c not in column_names]
+            if missing:
+                raise ValueError(
+                    f"column_names must include the coordinate columns {list(COORDINATE_COLUMNS)} "
+                    f"(missing: {missing}). hats-import needs them to place each alert on the sky."
+                )
+        super().__init__(
+            chunksize=chunksize,
+            column_names=column_names,
+            iterate_by_row_groups=iterate_by_row_groups,
+            **kwargs,
+        )
 
     def read(self, input_file, read_columns=None):
         """Read an alert parquet file in batches, reshaped for the catalog.
@@ -42,9 +70,9 @@ class AlertReader(ParquetPyarrowReader):
         read_columns : list[str] or None
             Output columns to return. hats-import asks for just ``ra`` and
             ``dec`` while mapping. The input files don't have those columns,
-            so only ``diaSource.ra`` and ``diaSource.dec`` are read to
-            compute them. If None, ``column_names`` is used, and if that is
-            also None, all columns are returned.
+            so ``diaSource.ra`` and ``diaSource.dec`` are read to compute them.
+            If None, ``column_names`` is used, and if that is also None, all
+            columns are returned.
 
         Yields
         ------
@@ -99,8 +127,8 @@ def add_coordinates(table: pa.Table) -> pa.Table:
         The same table with ``ra`` and ``dec`` as its first two columns.
     """
     source = table.column(COORDINATE_SOURCE)
-    for i, name in enumerate(COORDINATE_COLUMNS):
-        table = table.add_column(i, name, pc.struct_field(source, name))
+    for i, col_name in enumerate(COORDINATE_COLUMNS):
+        table = table.add_column(i, col_name, pc.struct_field(source, col_name))
     return table
 
 
