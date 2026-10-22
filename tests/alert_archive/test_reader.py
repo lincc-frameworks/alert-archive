@@ -13,9 +13,14 @@ from alert_archive.reader import AlertReader, transform_alerts
 NESTED_COLUMNS = ["diaSource", "prvDiaSources", "prvDiaForcedSources", "diaObject"]
 
 
-def read_all(sample_path, **kwargs):
-    """Read the sample with AlertReader and concatenate the batches."""
-    return pa.concat_tables(AlertReader(**kwargs).read(sample_path))
+def read_all(alert_sample_pq_path, **kwargs):
+    """Read the 12-alert test file with AlertReader and return it as one table.
+
+    AlertReader.read yields one table per batch of up to ``chunksize`` rows
+    (like hats-import uses it), so the batches are concatenated here.
+    ``kwargs`` go to AlertReader, e.g. ``chunksize=5`` gives batches of 5, 5 and 2.
+    """
+    return pa.concat_tables(AlertReader(**kwargs).read(alert_sample_pq_path))
 
 
 def assert_tables_equal(left, right):
@@ -24,63 +29,88 @@ def assert_tables_equal(left, right):
     assert json.dumps(left.to_pylist()) == json.dumps(right.to_pylist())
 
 
-def test_adds_coordinates_first(sample_path, raw_alerts):
-    """ra and dec are the first two columns and match diaSource."""
-    table = read_all(sample_path)
+def test_adds_coordinates_first(alert_sample_pq_path, raw_alerts):
+    """ra and dec are the first two columns, and each row's values equal
+    that alert's diaSource.ra / diaSource.dec in the raw file."""
+    table = read_all(alert_sample_pq_path)
     assert table.column_names[:2] == ["ra", "dec"]
-    for name in ["ra", "dec"]:
-        expected = pc.struct_field(raw_alerts["diaSource"], name)
-        assert table[name].to_pylist() == expected.to_pylist()
+    for col_name in ["ra", "dec"]:
+        expected = pc.struct_field(raw_alerts["diaSource"], col_name)
+        assert table[col_name].to_pylist() == expected.to_pylist()
 
 
-def test_struct_columns_become_nested(sample_path):
-    """nested-pandas sees every struct column as nested, with one row per alert for scalars."""
-    nf = npd.from_pyarrow(read_all(sample_path))
+def test_struct_columns_become_nested(alert_sample_pq_path):
+    """nested-pandas sees every struct column as nested, with one row per alert for scalars.
+
+    Motivation for this test: we see no failure at import-time if struct-to-nested
+    conversion goes wrong, but users would hit confusing errors/miss out on nested
+    features when they try to use the catalog."""
+    nf = npd.from_pyarrow(read_all(alert_sample_pq_path))
     assert sorted(nf.nested_columns) == sorted(NESTED_COLUMNS)
     assert all(len(nf.iloc[i]["diaSource"]) == 1 for i in range(len(nf)))
     assert all(len(nf.iloc[i]["diaObject"]) == 1 for i in range(len(nf)))
 
 
-def test_history_is_preserved(sample_path, raw_alerts):
+def test_history_is_preserved(alert_sample_pq_path, raw_alerts):
     """List-of-struct values survive conversion; null histories become empty."""
-    table = read_all(sample_path)
+    table = read_all(alert_sample_pq_path)
     raw = raw_alerts["prvDiaSources"].to_pylist()
+
     expected = [[s["diaSourceId"] for s in row] if row is not None else [] for row in raw]
     got = pc.struct_field(table["prvDiaSources"], "diaSourceId").to_pylist()
     assert got == expected
-    # The fixture covers both cases.
+
+    # Guard against a fixture that would make this test pass vacuously:
+    # it must contain at least one null history and one non-empty history.
     assert any(row is None for row in raw)
     assert any(row for row in raw)
 
 
-def test_keeps_solar_system_alerts(sample_path, raw_alerts):
-    """Alerts with diaObjectId == 0 are kept, not filtered."""
-    table = read_all(sample_path)
-    assert len(table) == len(raw_alerts)
-    object_ids = pc.list_flatten(pc.struct_field(table["diaSource"], "diaObjectId"))
-    assert 0 in object_ids.to_pylist()
+def test_keeps_solar_system_alerts(alert_sample_pq_path, raw_alerts):
+    """Solar-system alerts (diaObjectId == 0, ssObjectId set) are kept, with their ssObjectId."""
+    table = read_all(alert_sample_pq_path)
+    object_ids = pc.list_flatten(pc.struct_field(table["diaSource"], "diaObjectId")).to_pylist()
+    ss_ids = pc.list_flatten(pc.struct_field(table["diaSource"], "ssObjectId")).to_pylist()
+
+    output_ss_ids = [ss for obj, ss in zip(object_ids, ss_ids) if obj == 0]
+
+    all_raw_ss_ids = pc.struct_field(raw_alerts["diaSource"], "ssObjectId").to_pylist()
+    raw_ss_ids = [ss for ss in all_raw_ss_ids if ss != 0]
+    assert output_ss_ids == raw_ss_ids
+
+    # Guard against a fixture that would make this test pass vacuously.
+    assert raw_ss_ids
 
 
 @pytest.mark.parametrize("chunksize", [1, 5])
-def test_batches_match_single_read(sample_path, chunksize):
+def test_batches_match_single_read(alert_sample_pq_path, chunksize):
     """Reading in small batches (sliced arrays) gives the same result as one read."""
-    assert_tables_equal(read_all(sample_path, chunksize=chunksize), read_all(sample_path))
+    assert_tables_equal(read_all(alert_sample_pq_path, chunksize=chunksize), read_all(alert_sample_pq_path))
 
 
-def test_read_columns_coordinates_only(sample_path):
-    """hats-import's mapping stage asks for ra/dec, which don't exist in the input."""
-    batches = list(AlertReader().read(sample_path, read_columns=["ra", "dec"]))
+def test_read_columns_coordinates_only(alert_sample_pq_path):
+    """Asking for only ra and dec works, even though the input files have no such columns.
+
+    hats-import's mapping stage reads just ra and dec. The reader has to read
+    diaSource.ra / diaSource.dec from the file instead, and return only ra and
+    dec, with the same values as a full read.
+    """
+    batches = list(AlertReader().read(alert_sample_pq_path, read_columns=["ra", "dec"]))
     table = pa.concat_tables(batches)
     assert table.column_names == ["ra", "dec"]
-    full = read_all(sample_path)
+
+    # Check against a full read with all columns.
+    full = read_all(alert_sample_pq_path)
     assert_tables_equal(table, full.select(["ra", "dec"]))
 
 
-def test_read_columns_mixed(sample_path):
+def test_read_columns_mixed(alert_sample_pq_path):
     """Coordinates can be requested alongside a full struct column."""
-    table = pa.concat_tables(AlertReader().read(sample_path, read_columns=["diaSourceId", "ra", "diaSource"]))
+    table = pa.concat_tables(
+        AlertReader().read(alert_sample_pq_path, read_columns=["diaSourceId", "ra", "diaSource"])
+    )
     assert table.column_names == ["diaSourceId", "ra", "diaSource"]
-    assert_tables_equal(table, read_all(sample_path).select(["diaSourceId", "ra", "diaSource"]))
+    assert_tables_equal(table, read_all(alert_sample_pq_path).select(["diaSourceId", "ra", "diaSource"]))
 
 
 def test_drops_cutouts(raw_alerts):
@@ -90,12 +120,12 @@ def test_drops_cutouts(raw_alerts):
     assert not any(name.startswith("cutout") for name in table.column_names)
 
 
-def test_hats_import(sample_path, tmp_path):
+def test_hats_import(alert_sample_pq_path, tmp_path):
     """The reader works end to end in a hats-import pipeline."""
     args = ImportArguments(
         output_path=tmp_path,
         output_artifact_name="alerts",
-        input_file_list=[sample_path],
+        input_file_list=[alert_sample_pq_path],
         file_reader=AlertReader(),
         progress_bar=False,
     )
