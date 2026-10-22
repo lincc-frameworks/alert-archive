@@ -220,13 +220,16 @@ logged just above it. Each line names who ran it; for install errors, check
 `pip.log` in that person's private folder.
 
 Cron runs `submit.sh` with a much smaller environment than your login shell
-(no `module load slurm`, a minimal `PATH`), so a run that works by hand can
-still fail under cron. To try it the way cron runs it, on `sdfcron001`:
+(no `module load slurm`, a minimal `PATH`, `SHELL=/bin/sh`), and `sbatch`
+passes that environment on to the job, so a run that works by hand can still
+fail under cron. To try it the way cron runs it, on `sdfcron001`:
 
 ```bash
-env -i HOME=$HOME PATH=/sbin:/bin:/usr/sbin:/usr/bin \
+env -i HOME=$HOME SHELL=/bin/sh PATH=/sbin:/bin:/usr/sbin:/usr/bin \
     /sdf/data/rubin/user/$USER/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 ```
+
+This submits a real job, so check its `.out` file in `logs/` afterwards too.
 
 ### Changing pinned versions
 
