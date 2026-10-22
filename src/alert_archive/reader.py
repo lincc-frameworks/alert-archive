@@ -162,11 +162,22 @@ def to_nested(table: pa.Table) -> pa.Table:
 
 
 def _struct_to_nested(array: pa.StructArray) -> pa.StructArray:
+    """Turn a struct column into a struct of length-1 lists.
+
+    Each row's struct becomes one nested row, e.g. ``{a: 1, b: 2}`` becomes
+    ``{a: [1], b: [2]}``.
+    """
     offsets = pa.array(range(len(array) + 1), type=pa.int32())
     return _struct_of_lists(offsets, array)
 
 
 def _list_of_struct_to_nested(array: pa.ListArray) -> pa.StructArray:
+    """Turn a list-of-struct column into a struct of lists.
+
+    Each row's list of structs becomes one row of per-field lists of the same
+    length, e.g. ``[{a: 1}, {a: 2}]`` becomes ``{a: [1, 2]}``. A null list
+    becomes empty lists, ``{a: []}``.
+    """
     # flatten() accounts for slicing and skips anything behind null lists,
     # so the offsets are rebuilt from the list lengths rather than reused.
     lengths = pc.fill_null(pc.list_value_length(array), 0)
@@ -175,6 +186,25 @@ def _list_of_struct_to_nested(array: pa.ListArray) -> pa.StructArray:
 
 
 def _struct_of_lists(offsets: pa.Array, structs: pa.StructArray) -> pa.StructArray:
+    """Group a flat run of structs into rows, one list per struct field.
+
+    Row ``i`` holds ``structs[offsets[i]:offsets[i + 1]]``, split by field: for
+    each field of the structs, a list of that field's values over those
+    entries.
+
+    Parameters
+    ----------
+    offsets : pyarrow.Array
+        int32 row boundaries into ``structs``: ``len(rows) + 1`` values,
+        starting at 0 and ending at ``len(structs)``.
+    structs : pyarrow.StructArray
+        All entries for all rows, back to back.
+
+    Returns
+    -------
+    pyarrow.StructArray
+        One row per pair of consecutive offsets, with a list per field.
+    """
     # StructArray.flatten() (unlike .field()) applies the struct's own offset and validity.
     children = structs.flatten()
     return pa.StructArray.from_arrays(
