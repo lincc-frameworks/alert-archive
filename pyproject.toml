@@ -21,6 +21,8 @@ dependencies = [
     "lsdb",
     "nested-pandas",
     "hats",
+    "hats-import",
+    "pyarrow",
 ]
 
 [project.urls]
