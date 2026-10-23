@@ -14,7 +14,8 @@ Tools and benchmarks for the Rubin alert archive, built on LSDB.
 crossmatch, and more), run with
 [lf-bench](https://github.com/lincc-frameworks/lsdb-benchmarking). They run
 nightly on S3DF via a cron job that benchmarks `main`, and you can also run
-them by hand or against a branch.
+them by hand or against a branch. The nightly results are published at
+[alert-dashboard.lsdb.io](https://alert-dashboard.lsdb.io).
 
 See [benchmarks/README.md](benchmarks/README.md) for how to run them, where
-results are stored, and how to read them.
+results are stored, how they reach the dashboard, and how to read them.

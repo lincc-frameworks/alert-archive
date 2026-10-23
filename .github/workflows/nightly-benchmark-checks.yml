@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v7
     # shellcheck is preinstalled on GitHub's Ubuntu runners.
     - name: Lint the nightly scripts
-      run: shellcheck benchmarks/nightly/submit.sh benchmarks/nightly/run.sbatch
+      run: shellcheck benchmarks/nightly/submit.sh benchmarks/nightly/run.sbatch benchmarks/nightly/rsync-bench.sh
 
   pins:
     runs-on: ubuntu-latest
