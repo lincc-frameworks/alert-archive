@@ -37,6 +37,11 @@ results=$3
 # Pin the conda env rather than taking loadLSST.sh's default, which Rubin bumps.
 # lsst_distrib isn't set up; the benchmarks only need the venv's packages.
 export LSST_CONDA_ENV_NAME=$2
+# Cron runs submit.sh with SHELL=/bin/sh, and sbatch passes that on to this
+# job. loadLSST.sh picks its conda setup by the name of $SHELL, and for "sh"
+# it prints "Unknown shell" and exits, ending the job. This script is bash,
+# so say so.
+export SHELL=/bin/bash
 # The "shellcheck source=/dev/null" lines tell shellcheck (run on PRs by
 # .github/workflows/nightly-benchmark-checks.yml) not to look inside the file
 # sourced on the next line: these files only exist on S3DF, so the check would
