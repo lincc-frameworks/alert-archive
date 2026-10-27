@@ -78,17 +78,31 @@ def avro_to_arrow(avro_schema: dict) -> pa.Schema:
 
 
 def _avro_field(avro_field: dict, defined_records: dict) -> pa.Field:
+    """Convert one field of an Avro record to an Arrow field.
+
+    An optional field (``"null"`` plus one other type) becomes a nullable
+    field of the other type. Any other list of types raises ``ValueError``.
+    """
     avro_type = avro_field["type"]
+
     nullable = isinstance(avro_type, list)
     if nullable:
         others = [t for t in avro_type if t != "null"]
         if len(avro_type) != 2 or len(others) != 1:
             raise ValueError(f"Unsupported Avro union for {avro_field['name']!r}: {avro_type}")
         avro_type = others[0]
+
     return pa.field(avro_field["name"], _avro_type(avro_type, defined_records), nullable=nullable)
 
 
 def _avro_type(avro_type, defined_records: dict) -> pa.DataType:
+    """Convert an Avro type to an Arrow type.
+
+    A string is a primitive type (``"float"``) or the name of a record
+    defined earlier (``"diaSource"``). Arrays become lists and records become
+    structs. Each record is added to ``defined_records`` so that later
+    references to its name can be resolved. Anything else raises ``ValueError``.
+    """
     if isinstance(avro_type, str):
         if avro_type in AVRO_PRIMITIVES:
             return AVRO_PRIMITIVES[avro_type]
@@ -107,8 +121,8 @@ def _avro_type(avro_type, defined_records: dict) -> pa.DataType:
 @cache
 def known_schema_ids() -> tuple[int, ...]:
     """Format IDs with a schema file in the package, in increasing order."""
-    names = (p.name for p in files("alert_archive.schemas").iterdir())
-    return tuple(sorted(int(n.removesuffix(".json")) for n in names if n.endswith(".json")))
+    file_names = (p.name for p in files("alert_archive.schemas").iterdir())
+    return tuple(sorted(int(n.removesuffix(".json")) for n in file_names if n.endswith(".json")))
 
 
 @cache
@@ -127,7 +141,7 @@ def known_schema(schema_id: int) -> pa.Schema:
     """
     text = files("alert_archive.schemas").joinpath(f"{schema_id}.json").read_text()
     schema = avro_to_arrow(json.loads(text))
-    return pa.schema([f for f in schema if f.name not in EXCLUDED_COLUMNS])
+    return pa.schema([column for column in schema if column.name not in EXCLUDED_COLUMNS])
 
 
 @cache
@@ -150,6 +164,7 @@ def target_schema() -> pa.Schema:
 
 
 def _nullable(f: pa.Field) -> pa.Field:
+    """Copy of a field that is nullable, along with every field nested inside it."""
     if pa.types.is_struct(f.type):
         return pa.field(f.name, pa.struct([_nullable(c) for c in f.type]))
     if pa.types.is_list(f.type):
@@ -313,6 +328,11 @@ def _conform(array: pa.Array, target: pa.DataType, path: str, report: ConformRep
 
 
 def _conform_struct(array: pa.StructArray, target: pa.StructType, path: str, report: ConformReport):
+    """Convert a struct array field by field, recording what was changed.
+
+    Fields the target lacks are dropped, missing ones are filled with nulls,
+    and the rest go through :func:`_conform`. Rows that were null stay null.
+    """
     names = {f.name for f in array.type}
     report.dropped.extend(f"{path}.{n}" for n in sorted(names - {f.name for f in target}))
     children = []
@@ -328,4 +348,5 @@ def _conform_struct(array: pa.StructArray, target: pa.StructType, path: str, rep
 
 
 def _null_mask(array: pa.Array) -> pa.Array | None:
+    """Which rows of an array are null, or None if no row is (as Arrow's ``mask=`` expects)."""
     return array.is_null() if array.null_count else None
