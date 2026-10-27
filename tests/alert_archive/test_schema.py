@@ -6,7 +6,7 @@ import pytest
 from alert_archive.schema import (
     EXCLUDED_COLUMNS,
     SCHEMA_ID_COLUMN,
-    avro_to_arrow,
+    avro_schema_to_arrow,
     conform_alerts,
     infer_schema_id,
     known_schema,
@@ -35,10 +35,10 @@ def with_struct_field(table, column, name, values):
     return table.set_column(table.column_names.index(column), column, new)
 
 
-# ---------------------------------------------------------------- avro_to_arrow
+# ---------------------------------------------------------------- avro_schema_to_arrow
 
 
-def test_avro_to_arrow_types():
+def test_avro_schema_to_arrow_types():
     """Primitive types, nullable unions, arrays, records and references by name."""
     avro = {
         "type": "record",
@@ -62,7 +62,7 @@ def test_avro_to_arrow_types():
             pa.field("prv", pa.list_(src)),
         ]
     )
-    assert avro_to_arrow(avro).equals(expected)
+    assert avro_schema_to_arrow(avro).equals(expected)
 
 
 @pytest.mark.parametrize(
@@ -75,10 +75,12 @@ def test_avro_to_arrow_types():
         "notAType",
     ],
 )
-def test_avro_to_arrow_rejects_unsupported(avro_type):
+def test_avro_schema_to_arrow_rejects_unsupported(avro_type):
     """Anything outside the supported subset raises instead of guessing a type."""
     with pytest.raises(ValueError):
-        avro_to_arrow({"type": "record", "name": "alert", "fields": [{"name": "x", "type": avro_type}]})
+        avro_schema_to_arrow(
+            {"type": "record", "name": "alert", "fields": [{"name": "x", "type": avro_type}]}
+        )
 
 
 # ---------------------------------------------------------------- known formats

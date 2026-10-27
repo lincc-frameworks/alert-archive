@@ -47,7 +47,7 @@ AVRO_PRIMITIVES = {
 # ---------------------------------------------------------------- Avro schemas
 
 
-def avro_to_arrow(avro_schema: dict) -> pa.Schema:
+def avro_schema_to_arrow(avro_schema: dict) -> pa.Schema:
     """Convert an Avro record schema to an Arrow schema.
 
     Supports only the Avro features the alert formats use:
@@ -141,7 +141,7 @@ def known_schema(schema_id: int) -> pa.Schema:
         The format's columns, with Avro's nullability.
     """
     text = files("alert_archive.schemas").joinpath(f"{schema_id}.json").read_text()
-    schema = avro_to_arrow(json.loads(text))
+    schema = avro_schema_to_arrow(json.loads(text))
     return pa.schema([column for column in schema if column.name not in EXCLUDED_COLUMNS])
 
 

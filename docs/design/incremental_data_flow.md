@@ -158,9 +158,9 @@ contains it:
   (with the fields dropped or set to null), skipped chunks with their errors,
   and chunks that have kept failing ("failing since <date>"), so a chunk that
   fails every night doesn't look like news each time.
-- **Schema checks happen at development time.** `avro_to_arrow` raises on any
-  Avro feature it doesn't support. It only runs on our own copies of the known
-  schema files, so that error shows up in tests, never in a nightly run.
+- **Schema checks happen at development time.** `avro_schema_to_arrow` raises
+  on any Avro feature it doesn't support. It only runs on our own copies of the
+  known schema files, so that error shows up in tests, never in a nightly run.
 - **Where each part lives:** `schema.py` doesn't catch errors or send email.
   It returns the converted table plus a report of what it dropped, filled
   or set to null, and which `schemaId`s it saw. The daily run decides what to
