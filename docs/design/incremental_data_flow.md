@@ -158,10 +158,13 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   - It assumes new alerts always arrive in new raw subdirs and existing subdirs
     never change. Subdirs are alertId prefixes, not nights, so this should be checked.
   - It also strips `ssSource` and `mpc_orbits`, not just the cutouts.
-- **Email delivery:** `mail` exists on the interactive nodes. Does it actually
-  deliver when run from the nightly job? `mail` exiting cleanly only means it
-  accepted the message, not that it was delivered, so the only real check is
-  sending a test email from a batch job.
+- **Email delivery (checked 2026-10-27):** `mail` delivers from both an
+  interactive node and a milano compute node, run from a Slurm job submitted
+  with cron's minimal environment. Mail to an external (CMU) address arrived
+  from both. The compute nodes use Sendmail rather than postfix as
+  `/usr/sbin/sendmail`, but both relay through `sdfmail.sdf.slac.stanford.edu`.
+  `mail` exiting cleanly only means it accepted the message, so a broken relay
+  wouldn't show up as an error; it would show up as missing emails.
 
 ## Implementation plan
 

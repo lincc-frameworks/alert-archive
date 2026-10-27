@@ -9,7 +9,17 @@ from alert_archive.state import RunRecord
 def fake_mail(tmp_path):
     """A stand-in for ``mail`` that saves its arguments and stdin to files."""
     script = tmp_path / "fake_mail"
-    script.write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/args\ncat > {tmp_path}/body\n')
+    # A shell script, run by send_email in place of `mail`. The tests read the
+    # two files it writes to check what send_email passed to the command,
+    # without sending any email.
+    # The \ after """ keeps #!/bin/sh on the first line, where it must be.
+    script.write_text(f"""\
+#!/bin/sh
+echo "$@" > {tmp_path}/args   # its arguments: -s, subject, recipients
+cat > {tmp_path}/body         # what was piped to stdin: the email body
+""")
+    # New files aren't executable, and subprocess.run can only run a file
+    # directly if it is. 0o755 = owner can read/write/execute, others read/execute.
     script.chmod(0o755)
     return script
 
