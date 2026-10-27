@@ -84,14 +84,14 @@ def daily_summary(
     status = ", ".join(problems) or "OK"
     subject = f"daily {record.run_id}: {status}"
 
-    schema_ids = ", ".join(
-        f"{'unknown' if k is None else k}: {v}" for k, v in sorted(record.schema_ids.items(), key=str)
+    counts_text = ", ".join(
+        f"{'unknown' if k is None else k}: {v}" for k, v in sorted(record.schema_id_counts.items(), key=str)
     )
     lines = [
         f"Run {record.run_id}, started {record.started}",
         f"Ingested {record.num_rows} alerts from {len(record.chunks)} chunk(s)"
         + (f" into {record.file_name}" if record.file_name else ""),
-        f"Alerts per format: {schema_ids or 'none'}",
+        f"Alerts per format: {counts_text or 'none'}",
     ]
 
     if format_change:

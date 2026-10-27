@@ -37,7 +37,7 @@ def test_daily_summary_ok():
         file_name="r1.parquet",
         chunks=["a", "b"],
         num_rows=100,
-        schema_ids={1100: 90, 1101: 10},
+        schema_id_counts={1100: 90, 1101: 10},
     )
     subject, body = daily_summary(record)
     assert subject == "daily r1: OK"
@@ -52,7 +52,7 @@ def test_daily_summary_reports_problems():
     record = RunRecord(
         run_id="r3",
         started="t3",
-        schema_ids={None: 5},
+        schema_id_counts={None: 5},
         skipped={"new.parquet": "truncated", "old.parquet": "corrupt"},
     )
     failing = {"new.parquet": ("t3", "truncated"), "old.parquet": ("t1", "corrupt")}

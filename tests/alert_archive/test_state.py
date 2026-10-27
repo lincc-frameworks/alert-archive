@@ -17,7 +17,7 @@ def test_new_run_id_is_utc_timestamp():
 
 def test_run_record_round_trips_unknown_schema_id():
     """None (unknown format) keys survive JSON, which only allows string keys."""
-    record = make_run("r1", chunks=["a.parquet"], num_rows=5, schema_ids={1100: 4, None: 1})
+    record = make_run("r1", chunks=["a.parquet"], num_rows=5, schema_id_counts={1100: 4, None: 1})
     assert RunRecord.from_json(record.to_json()) == record
 
 

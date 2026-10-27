@@ -51,7 +51,7 @@ class RunRecord:
     """Input chunks ingested by this run."""
     num_rows: int = 0
     """Number of alerts written."""
-    schema_ids: dict[int | None, int] = field(default_factory=dict)
+    schema_id_counts: dict[int | None, int] = field(default_factory=dict)
     """Number of alerts per format ID. None means the format is unknown."""
     skipped: dict[str, str] = field(default_factory=dict)
     """Input chunks that failed, with their error. They aren't ingested, so the next run retries them."""
@@ -59,22 +59,24 @@ class RunRecord:
     def to_json(self) -> str:
         """Serialize as one JSON line. Unknown format IDs are written as ``"unknown"``."""
         data = asdict(self)
-        data["schema_ids"] = {_schema_id_key(k): v for k, v in self.schema_ids.items()}
+        data["schema_id_counts"] = {_schema_id_key(k): v for k, v in self.schema_id_counts.items()}
         return json.dumps(data)
 
     @classmethod
     def from_json(cls, line: str) -> "RunRecord":
         """Parse one line written by :meth:`to_json`."""
         data = json.loads(line)
-        data["schema_ids"] = {_schema_id_from_key(k): v for k, v in data["schema_ids"].items()}
+        data["schema_id_counts"] = {_schema_id_from_key(k): v for k, v in data["schema_id_counts"].items()}
         return cls(**data)
 
 
 def _schema_id_key(schema_id: int | None) -> str:
+    """Turn a format ID into a JSON key: ``1100`` -> ``"1100"``, None -> ``"unknown"``."""
     return UNKNOWN_SCHEMA_ID if schema_id is None else str(schema_id)
 
 
 def _schema_id_from_key(key: str) -> int | None:
+    """Inverse of :func:`_schema_id_key`: ``"1100"`` -> ``1100``, ``"unknown"`` -> None."""
     return None if key == UNKNOWN_SCHEMA_ID else int(key)
 
 
