@@ -96,9 +96,9 @@ def daily_summary(
     mark = PROBLEM_MARK if problems else OK_MARK
     subject = f"{mark} daily {record.run_id}: {status}"
 
-    counts_text = ", ".join(
-        f"{'unknown' if k is None else k}: {v}" for k, v in sorted(record.schema_id_counts.items(), key=str)
-    )
+    # Format IDs in numeric order, unknown (None) last.
+    counts = sorted(record.schema_id_counts.items(), key=lambda kv: (kv[0] is None, kv[0] or 0))
+    counts_text = ", ".join(f"{'unknown' if k is None else k}: {v}" for k, v in counts)
     lines = [
         "SUMMARY",
         f"  Run {record.run_id}, started {record.started}",

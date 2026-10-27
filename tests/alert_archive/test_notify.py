@@ -59,6 +59,13 @@ def test_daily_summary_ok():
     assert "SKIPPED CHUNKS" not in body
 
 
+def test_daily_summary_sorts_formats_numerically():
+    """Format IDs are listed in numeric order (999 before 1100), with unknown last."""
+    record = RunRecord(run_id="r1", started="t1", schema_id_counts={None: 1, 1100: 2, 999: 3})
+    _, body = daily_summary(record)
+    assert "999: 3, 1100: 2, unknown: 1" in body
+
+
 def test_daily_summary_reports_problems():
     """Format changes and skipped chunks are in the subject; only repeat failures say 'failing since'."""
     record = RunRecord(
