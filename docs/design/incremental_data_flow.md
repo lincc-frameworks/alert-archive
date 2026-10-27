@@ -174,3 +174,4 @@ and nothing runs on a schedule until PR 9.
 | 7 | **Daily run + replay** | `daily/run.py`, `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
+| 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |
