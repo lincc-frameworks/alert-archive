@@ -33,7 +33,7 @@ dependencies = [
 dev = [
     "jupyter", # Clears output from Jupyter notebooks
     "pre-commit", # Used to run checks before finalizing a git commit
-    "pytest",
+    "pytest<9.2", # pytest-benchmark 5.3.0 uses node._nodeid, which pytest 9.2.0 removed; lift once fixed
     "pytest-cov", # Used to report total code coverage
     "ruff", # Used for static linting of files
 ]
