@@ -13,11 +13,13 @@ def fake_mail(tmp_path):
     # two files it writes to check what send_email passed to the command,
     # without sending any email.
     # The \ after """ keeps #!/bin/sh on the first line, where it must be.
-    script.write_text(f"""\
+    script.write_text(
+        f"""\
 #!/bin/sh
 echo "$@" > {tmp_path}/args   # its arguments: -s, subject, recipients
 cat > {tmp_path}/body         # what was piped to stdin: the email body
-""")
+"""
+    )
     # New files aren't executable, and subprocess.run can only run a file
     # directly if it is. 0o755 = owner can read/write/execute, others read/execute.
     script.chmod(0o755)

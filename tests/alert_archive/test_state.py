@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import numpy as np
 import pytest
 from alert_archive.state import LockHeldError, PipelineState, RunRecord, new_run_id
 
@@ -19,6 +20,22 @@ def test_run_record_round_trips_unknown_schema_id():
     """None (unknown format) keys survive JSON, which only allows string keys."""
     record = make_run("r1", chunks=["a.parquet"], num_rows=5, schema_id_counts={1100: 4, None: 1})
     assert RunRecord.from_json(record.to_json()) == record
+
+
+def test_run_record_accepts_numpy_counts():
+    """Counts from numpy (e.g. pandas value_counts) become plain ints, so the record can be written."""
+    record = make_run(
+        "r1", num_rows=np.int64(5), schema_id_counts={np.int64(1100): np.int64(4), None: np.int64(1)}
+    )
+    assert RunRecord.from_json(record.to_json()) == make_run(
+        "r1", num_rows=5, schema_id_counts={1100: 4, None: 1}
+    )
+
+
+def test_run_record_rejects_float_counts():
+    """A float count is a bug upstream, so it fails rather than being truncated."""
+    with pytest.raises(TypeError):
+        make_run("r1", num_rows=4.5)
 
 
 def test_empty_state(tmp_path):
@@ -64,13 +81,13 @@ def write_catalog_files(catalog_dir, file_name, pixels):
     return paths
 
 
-
 def test_append_run_leaves_no_temp_file(tmp_path):
     """The log is replaced atomically, so only the log itself is left in the state directory."""
     state = PipelineState(tmp_path)
     state.append_run(make_run("r1"))
     state.append_run(make_run("r2"))
     assert [p.name for p in tmp_path.iterdir()] == ["ingested.jsonl"]
+
 
 def test_reingest_runs_deletes_files_and_log_lines(tmp_path):
     """Only the chosen runs' files and log lines go; other runs and runs that wrote nothing are fine."""
@@ -128,7 +145,6 @@ def test_reingest_unknown_run_changes_nothing(tmp_path):
     assert [r.run_id for r in state.runs()] == ["r1"]
 
 
-
 def test_reingest_refuses_while_locked(tmp_path):
     """Re-ingesting while a daily or weekly job holds the lock fails and changes nothing."""
     state = PipelineState(tmp_path / "state")
@@ -140,6 +156,7 @@ def test_reingest_refuses_while_locked(tmp_path):
     assert all(p.exists() for p in r1_files)
     assert [r.run_id for r in state.runs()] == ["r1"]
     assert not state.lock_path.exists()
+
 
 def test_failing_chunks_tracks_first_failure(tmp_path):
     """A chunk that keeps failing keeps its first failure time and its latest error.

@@ -13,6 +13,7 @@ Nothing here catches errors or sends email; the jobs decide what to do.
 """
 
 import json
+import operator
 import os
 import socket
 from collections.abc import Generator
@@ -56,6 +57,15 @@ class RunRecord:
     """Number of alerts per format ID. None means the format is unknown."""
     skipped: dict[str, str] = field(default_factory=dict)
     """Input chunks that failed, with their error. They aren't ingested, so the next run retries them."""
+
+    def __post_init__(self):
+        # Counts often come from pyarrow or pandas as numpy ints, which json can't write.
+        # operator.index turns them into plain ints, and raises on floats rather than truncating.
+        self.num_rows = operator.index(self.num_rows)
+        self.schema_id_counts = {
+            None if k is None else operator.index(k): operator.index(v)
+            for k, v in self.schema_id_counts.items()
+        }
 
     def to_json(self) -> str:
         """Serialize as one JSON line. Unknown format IDs are written as ``"unknown"``."""
@@ -216,7 +226,9 @@ class PipelineState:
         catalog_dir = Path(catalog_dir)
         with self.lock("reingest"):
             runs = self._find_runs(run_ids)
-            files = {r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name}
+            files = {
+                r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name
+            }
             merged = [run_id for run_id, paths in files.items() if not paths]
             if merged and not missing_files_ok:
                 raise FileNotFoundError(
