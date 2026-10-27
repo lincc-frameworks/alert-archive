@@ -106,10 +106,12 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   per-alert `schemaId` column read from the Avro header (bytes 1–4).
 - **`schemaId` is mocked for now.** Neven's dump has no format ID and uses
   one uniform column set: no 1101 fields, and every field nullable. So the
-  mock infers it from the columns present: `1101` if any of the four 1101
-  `diaSource` fields exist, otherwise `1100`. 1000 and 1100 differ only in
+  mock infers it from the columns: the newest known format whose columns
+  match exactly, or unknown if none do. 1000 and 1100 differ only in
   nullability, so the dump can't tell them apart. It doesn't matter here,
-  because both cast to the catalog the same way. The real value replaces the
+  because both cast to the catalog the same way. The catalog stores the
+  inferred value, so alerts from the dump are all labelled `1100`, including
+  any that were really `1000`. The real value replaces the
   mock once the converter rewrite lands. The 170xxx raw Avro files are still on
   disk, so the real IDs could be recovered later if needed.
 - **Format 1101 is supported.** The new catalog uses the 1101 columns. Rows
@@ -148,7 +150,7 @@ contains it:
 
 | Level | Example | What happens | How it's recovered |
 |---|---|---|---|
-| **Field** | A new alert format changes a field's type, or adds or removes fields | All alerts are kept. Unknown fields are dropped, missing ones are filled with nulls, and a field that can't be converted is set to null for that batch. Sets the format-change flag. | After the code is fixed, re-ingest the flagged runs: delete the catalog files those runs wrote (`Npix=*/<run_id>.parquet`, listed in `ingested.jsonl`), drop their log lines, re-run. Their input chunks are still on disk. |
+| **Field** | A new alert format changes a field's type, or adds or removes fields | All alerts are kept. Unknown fields are dropped, missing ones are filled with nulls, and a field that can't be converted is set to null for every alert in that chunk, not just the ones with bad values. Sets the format-change flag. | After the code is fixed, re-ingest the flagged runs: delete the catalog files those runs wrote (`Npix=*/<run_id>.parquet`, listed in `ingested.jsonl`), drop their log lines, re-run. Their input chunks are still on disk. |
 | **Chunk** | A corrupt or truncated parquet file | That chunk is skipped and its error recorded; every other chunk is ingested. | Automatic: a skipped chunk never enters `ingested.jsonl`, so the next nightly run finds it again. If it needs a code fix, the first run after the fix picks it up. |
 | **Run** | Catalog not writable, disk full, lock held | The run stops with an error rather than risk a half-written catalog. | Fix the cause and re-run. Safe because metadata is recomputed from disk. |
 
