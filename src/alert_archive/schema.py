@@ -50,8 +50,13 @@ AVRO_PRIMITIVES = {
 def avro_to_arrow(avro_schema: dict) -> pa.Schema:
     """Convert an Avro record schema to an Arrow schema.
 
-    Supports only what the alert formats use: records, arrays, primitive
-    types, ``["null", X]`` unions and references to records by name.
+    Supports only the Avro features the alert formats use:
+
+    - records, arrays and primitive types (``long``, ``float``, ...);
+    - optional fields, which Avro writes as a list of ``"null"`` and one other
+      type, e.g. ``{"name": "snr", "type": ["null", "float"]}``;
+    - references to a record defined earlier, by its name, e.g.
+      ``{"type": "array", "items": "diaSource"}``.
 
     Parameters
     ----------
@@ -61,18 +66,18 @@ def avro_to_arrow(avro_schema: dict) -> pa.Schema:
     Returns
     -------
     pyarrow.Schema
-        One field per record field. ``["null", X]`` fields are nullable.
+        One field per record field. Optional fields are nullable; all others are not.
 
     Raises
     ------
     ValueError
         If the schema uses an Avro feature not listed above.
     """
-    named = {}  # record name -> struct type, for references like array<diaSource>
-    return pa.schema([_avro_field(f, named) for f in avro_schema["fields"]])
+    defined_records = {}  # record name -> struct type, for references like array<diaSource>
+    return pa.schema([_avro_field(f, defined_records) for f in avro_schema["fields"]])
 
 
-def _avro_field(avro_field: dict, named: dict) -> pa.Field:
+def _avro_field(avro_field: dict, defined_records: dict) -> pa.Field:
     avro_type = avro_field["type"]
     nullable = isinstance(avro_type, list)
     if nullable:
@@ -80,21 +85,21 @@ def _avro_field(avro_field: dict, named: dict) -> pa.Field:
         if len(avro_type) != 2 or len(others) != 1:
             raise ValueError(f"Unsupported Avro union for {avro_field['name']!r}: {avro_type}")
         avro_type = others[0]
-    return pa.field(avro_field["name"], _avro_type(avro_type, named), nullable=nullable)
+    return pa.field(avro_field["name"], _avro_type(avro_type, defined_records), nullable=nullable)
 
 
-def _avro_type(avro_type, named: dict) -> pa.DataType:
+def _avro_type(avro_type, defined_records: dict) -> pa.DataType:
     if isinstance(avro_type, str):
         if avro_type in AVRO_PRIMITIVES:
             return AVRO_PRIMITIVES[avro_type]
-        if avro_type in named:
-            return named[avro_type]
+        if avro_type in defined_records:
+            return defined_records[avro_type]
         raise ValueError(f"Unsupported or unknown Avro type: {avro_type!r}")
     if isinstance(avro_type, dict) and avro_type.get("type") == "array":
-        return pa.list_(_avro_type(avro_type["items"], named))
+        return pa.list_(_avro_type(avro_type["items"], defined_records))
     if isinstance(avro_type, dict) and avro_type.get("type") == "record":
-        struct = pa.struct([_avro_field(f, named) for f in avro_type["fields"]])
-        named[avro_type["name"]] = struct
+        struct = pa.struct([_avro_field(f, defined_records) for f in avro_type["fields"]])
+        defined_records[avro_type["name"]] = struct
         return struct
     raise ValueError(f"Unsupported Avro type: {avro_type}")
 

@@ -3,7 +3,6 @@ import json
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
-
 from alert_archive.schema import (
     EXCLUDED_COLUMNS,
     SCHEMA_ID_COLUMN,
