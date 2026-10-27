@@ -204,6 +204,16 @@ def test_conform_drops_unknown_fields(raw_alerts):
     assert report.is_format_change
 
 
+def test_conform_fills_missing_columns(raw_alerts):
+    """A missing column is filled with nulls; its absence matches no known format, so it's flagged."""
+    result, report = conform_alerts(raw_alerts.drop_columns(["diaObject"]))
+    assert result.schema.equals(target_schema())
+    assert "diaObject" in report.filled
+    assert result.column("diaObject").null_count == len(result)
+    assert report.unknown_schema_ids == [None]
+    assert report.is_format_change
+
+
 def test_conform_casts_or_nulls_changed_types(raw_alerts):
     """A changed type is converted if possible, otherwise set to null; other fields are untouched."""
     detectors = pc.struct_field(raw_alerts["diaSource"], "detector").cast(pa.int64())
