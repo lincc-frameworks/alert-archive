@@ -30,7 +30,7 @@ flowchart TD
         D1["Find unprocessed batches<br/>(compare with ingested-file list)"]
         D2["AlertReader transform<br/>add ra/dec, struct → nested, drop cutouts"]
         D3["Cast to catalog columns (1101)<br/>best effort for unknown formats"]
-        D4["Write Npix=N/&lt;date&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
+        D4["Write Npix=N/&lt;run_id&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
         D1 --> D2 --> D3 --> D4
         D3 -->|"unknown format"| FLAG["Set format-change flag<br/>+ email"]
     end
@@ -91,12 +91,16 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   needs for promote and rollback.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
-  - `ingested.jsonl`: one line per daily run, with the run ID, the parquet
-    file name it wrote, its input chunks, its row count and its `schemaId`
-    counts. Nightly files are named by run ID, not date, so a manual re-run
-    can't overwrite an earlier run's files.
+  - `ingested.jsonl`: one line per daily run, with the run ID, its start
+    time, the parquet file name it wrote, its input chunks, its row count and
+    its `schemaId` counts. It also lists the chunks the run skipped, with their
+    errors, so the summary email can say how long a chunk has been failing.
+    Only the input chunks count as ingested. Nightly files are named by run ID,
+    not date, so a manual re-run can't overwrite an earlier run's files.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
+    If a job dies without removing it, nothing breaks it automatically: the
+    next job fails loudly until a person checks and deletes it.
 
 ### Input and alert formats
 
@@ -155,7 +159,9 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
     never change. Subdirs are alertId prefixes, not nights, so this should be checked.
   - It also strips `ssSource` and `mpc_orbits`, not just the cutouts.
 - **Email delivery:** `mail` exists on the interactive nodes. Does it actually
-  deliver when run from the nightly job?
+  deliver when run from the nightly job? `mail` exiting cleanly only means it
+  accepted the message, not that it was delivered, so the only real check is
+  sending a test email from a batch job.
 
 ## Implementation plan
 
