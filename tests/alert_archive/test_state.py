@@ -53,23 +53,70 @@ def test_skipped_chunks_are_not_ingested(tmp_path):
     assert state.ingested_chunks() == {"a"}
 
 
-def test_remove_runs_frees_their_chunks(tmp_path):
-    """Removing a run (to re-ingest it) frees its chunks and keeps the other runs."""
-    state = PipelineState(tmp_path)
-    for run in [make_run("r1", ["a"]), make_run("r2", ["b"]), make_run("r3", ["c"])]:
-        state.append_run(run)
-    removed = state.remove_runs(["r2"])
-    assert [r.run_id for r in removed] == ["r2"]
-    assert [r.run_id for r in state.runs()] == ["r1", "r3"]
-    assert state.ingested_chunks() == {"a", "c"}
+def write_catalog_files(catalog_dir, file_name, pixels):
+    """Create empty files where a run would have written to each pixel, and return their paths."""
+    paths = []
+    for order, pixel in pixels:
+        path = catalog_dir / "dataset" / f"Norder={order}" / "Dir=0" / f"Npix={pixel}" / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        paths.append(path)
+    return paths
 
 
-def test_remove_unknown_run_changes_nothing(tmp_path):
-    """A typo in a run ID doesn't remove the other runs listed with it."""
-    state = PipelineState(tmp_path)
-    state.append_run(make_run("r1", ["a"]))
+def test_reingest_runs_deletes_files_and_log_lines(tmp_path):
+    """Only the chosen runs' files and log lines go; other runs and runs that wrote nothing are fine."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10), (2, 50)])
+    r2_files = write_catalog_files(catalog, "r2.parquet", [(1, 10)])
+    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    state.append_run(make_run("r2", ["b"], file_name="r2.parquet"))
+    state.append_run(make_run("r3", skipped={"c": "corrupt"}))
+
+    removed = state.reingest_runs(catalog, ["r1", "r3"])
+
+    assert [r.run_id for r in removed] == ["r1", "r3"]
+    assert not any(p.exists() for p in r1_files)
+    assert all(p.exists() for p in r2_files)
+    assert state.ingested_chunks() == {"b"}
+
+
+def test_reingest_refuses_merged_runs(tmp_path):
+    """A run whose files are gone (e.g. merged by the weekly re-import) stops everything,
+    so other runs listed with it keep their files and log lines too."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
+    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    state.append_run(make_run("r2", ["b"], file_name="r2.parquet"))
+
+    with pytest.raises(FileNotFoundError, match="r2"):
+        state.reingest_runs(catalog, ["r1", "r2"])
+
+    assert all(p.exists() for p in r1_files)
+    assert state.ingested_chunks() == {"a", "b"}
+
+
+def test_reingest_missing_files_ok(tmp_path):
+    """With missing_files_ok, a run whose files are already gone is taken off the log,
+    e.g. to finish a call that stopped after deleting them."""
+    state = PipelineState(tmp_path / "state")
+    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    removed = state.reingest_runs(tmp_path / "catalog", ["r1"], missing_files_ok=True)
+    assert [r.run_id for r in removed] == ["r1"]
+    assert state.runs() == []
+
+
+def test_reingest_unknown_run_changes_nothing(tmp_path):
+    """A typo in a run ID doesn't delete or remove the other runs listed with it."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
+    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
     with pytest.raises(KeyError, match="nope"):
-        state.remove_runs(["r1", "nope"])
+        state.reingest_runs(catalog, ["r1", "nope"])
+    assert all(p.exists() for p in r1_files)
     assert [r.run_id for r in state.runs()] == ["r1"]
 
 

@@ -155,16 +155,35 @@ class PipelineState:
             f.flush()
             os.fsync(f.fileno())
 
-    def remove_runs(self, run_ids) -> list[RunRecord]:
-        """Take runs off the ingested log so their chunks are ingested again.
+    def reingest_runs(self, catalog_dir, run_ids, missing_files_ok: bool = False) -> list[RunRecord]:
+        """Delete the catalog files that runs wrote and take the runs off the log.
 
-        This is the log half of re-ingesting a night. Deleting the catalog
-        files the runs wrote (``Npix=*/<file_name>``) is up to the caller.
+        The next daily run then ingests their chunks again, into new files
+        named by its own run ID. Use this to redo runs that wrote bad data,
+        e.g. the runs flagged for a format change, once the code handles the
+        new format.
+
+        Only use this before the weekly re-import has merged the runs' files
+        into the catalog. After that, there are no separate files to delete,
+        and re-ingesting the chunks would add their alerts a second time.
+        While the format-change flag is set, the weekly re-import doesn't run,
+        so flagged runs are safe to redo until the flag is cleared.
+
+        Every run is checked before anything is deleted. Files are deleted
+        before the log is changed, so if this stops partway, the runs are
+        still in the log and nothing is ingested twice.
 
         Parameters
         ----------
+        catalog_dir : str or path-like
+            The working catalog the runs wrote to.
         run_ids : iterable of str
-            IDs of the runs to remove.
+            IDs of the runs to redo.
+        missing_files_ok : bool
+            If True, runs with no files left are taken off the log anyway.
+            Use this only when you know the files were deleted rather than
+            merged, e.g. when an earlier call stopped after deleting them
+            but before changing the log.
 
         Returns
         -------
@@ -174,16 +193,42 @@ class PipelineState:
         Raises
         ------
         KeyError
-            If any of the IDs isn't in the log. Nothing is removed then.
+            If any of the IDs isn't in the log. Nothing is deleted or removed then.
+        FileNotFoundError
+            If a run that wrote files has none left in the catalog, most
+            likely because the weekly re-import merged them, and
+            ``missing_files_ok`` is False. Nothing is deleted or removed then.
         """
+        catalog_dir = Path(catalog_dir)
+        runs = self._find_runs(run_ids)
+        files = {r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name}
+        merged = [run_id for run_id, paths in files.items() if not paths]
+        if merged and not missing_files_ok:
+            raise FileNotFoundError(
+                f"no Npix=*/<file> files in {catalog_dir} for runs {merged}. If the weekly "
+                "re-import merged them, re-ingesting would add their alerts a second time. "
+                "If you know they were deleted instead, pass missing_files_ok=True."
+            )
+        for path in (p for paths in files.values() for p in paths):
+            path.unlink()
+        return self._remove_runs(r.run_id for r in runs)
+
+    def _remove_runs(self, run_ids) -> list[RunRecord]:
+        """Take runs off the ingested log and return them. Their catalog files must already be gone."""
+        removed = self._find_runs(run_ids)
+        removed_ids = {r.run_id for r in removed}
+        kept = [r for r in self.runs() if r.run_id not in removed_ids]
+        _write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
+        return removed
+
+    def _find_runs(self, run_ids) -> list[RunRecord]:
+        """The log's runs with these IDs, in log order. Raises KeyError if any is missing."""
         run_ids = set(run_ids)
-        runs = self.runs()
+        runs = [r for r in self.runs() if r.run_id in run_ids]
         missing = run_ids - {r.run_id for r in runs}
         if missing:
             raise KeyError(f"runs not in {self.log_path}: {sorted(missing)}")
-        kept = [r for r in runs if r.run_id not in run_ids]
-        _write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
-        return [r for r in runs if r.run_id in run_ids]
+        return runs
 
     def ingested_chunks(self) -> set[str]:
         """Names of all input chunks that some run has ingested."""
