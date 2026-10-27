@@ -4,6 +4,7 @@ Each run sends one summary email, not one per error. :func:`daily_summary`
 builds it and :func:`send_email` sends it with the ``mail`` command.
 """
 
+import os
 import subprocess
 
 from .state import RunRecord
@@ -14,12 +15,21 @@ DEFAULT_RECIPIENTS = ("olynn@andrew.cmu.edu",)
 SUBJECT_PREFIX = "[alert-archive]"
 """Prefix on every email subject, for filtering."""
 
+OK_MARK = "\N{WHITE HEAVY CHECK MARK}"
+"""Start of the subject when a run had no problems (a green check)."""
+
+PROBLEM_MARK = "\N{CROSS MARK}"
+"""Start of the subject when a run had a format change or skipped chunks (a red x)."""
+
 
 def send_email(subject: str, body: str, recipients=DEFAULT_RECIPIENTS, mail_command: str = "mail"):
     """Send an email with the ``mail`` command.
 
     ``mail`` exiting cleanly means the message was handed to the local mail
     system, not that it was delivered.
+
+    ``mail`` runs with a UTF-8 locale, so it can encode non-ASCII text such as
+    the emoji in subjects. Cron and Slurm jobs started from cron don't set one.
 
     Parameters
     ----------
@@ -48,6 +58,7 @@ def send_email(subject: str, body: str, recipients=DEFAULT_RECIPIENTS, mail_comm
         text=True,
         check=True,
         capture_output=True,
+        env={**os.environ, "LC_ALL": "C.UTF-8"},
     )
 
 
@@ -82,27 +93,30 @@ def daily_summary(
     if record.skipped:
         problems.append(f"{len(record.skipped)} chunk(s) skipped")
     status = ", ".join(problems) or "OK"
-    subject = f"daily {record.run_id}: {status}"
+    mark = PROBLEM_MARK if problems else OK_MARK
+    subject = f"{mark} daily {record.run_id}: {status}"
 
     counts_text = ", ".join(
         f"{'unknown' if k is None else k}: {v}" for k, v in sorted(record.schema_id_counts.items(), key=str)
     )
     lines = [
-        f"Run {record.run_id}, started {record.started}",
-        f"Ingested {record.num_rows} alerts from {len(record.chunks)} chunk(s)"
+        "SUMMARY",
+        f"  Run {record.run_id}, started {record.started}",
+        f"  Ingested {record.num_rows} alerts from {len(record.chunks)} chunk(s)"
         + (f" into {record.file_name}" if record.file_name else ""),
-        f"Alerts per format: {counts_text or 'none'}",
+        f"  Alerts per format: {counts_text or 'none'}",
     ]
 
     if format_change:
         lines += [
             "",
-            "Format change (the flag is set; Saturday's re-import will skip until it's cleared):",
+            "FORMAT CHANGE",
+            "  The flag is set; Saturday's re-import will skip until it's cleared.",
             *(f"  {k}: {v}" for k, v in format_change.items()),
         ]
 
     if record.skipped:
-        lines += ["", "Skipped chunks (retried next run):"]
+        lines += ["", "SKIPPED CHUNKS", "  Retried next run."]
         for chunk, error in sorted(record.skipped.items()):
             since = failing.get(chunk, (record.started,))[0]
             note = "" if since == record.started else f" (failing since {since})"

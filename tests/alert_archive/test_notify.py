@@ -1,7 +1,7 @@
 import subprocess
 
 import pytest
-from alert_archive.notify import SUBJECT_PREFIX, daily_summary, send_email
+from alert_archive.notify import OK_MARK, PROBLEM_MARK, SUBJECT_PREFIX, daily_summary, send_email
 from alert_archive.state import RunRecord
 
 
@@ -26,8 +26,8 @@ cat > {tmp_path}/body         # what was piped to stdin: the email body
 
 def test_send_email(tmp_path, fake_mail):
     """The mail command gets the prefixed subject and recipients as args, and the body on stdin."""
-    send_email("hello", "line 1\nline 2\n", ["a@x.org", "b@x.org"], mail_command=str(fake_mail))
-    assert (tmp_path / "args").read_text() == f"-s {SUBJECT_PREFIX} hello a@x.org b@x.org\n"
+    send_email(f"{OK_MARK} hello", "line 1\nline 2\n", ["a@x.org", "b@x.org"], mail_command=str(fake_mail))
+    assert (tmp_path / "args").read_text() == f"-s {SUBJECT_PREFIX} {OK_MARK} hello a@x.org b@x.org\n"
     assert (tmp_path / "body").read_text() == "line 1\nline 2\n"
 
 
@@ -50,11 +50,11 @@ def test_daily_summary_ok():
         schema_id_counts={1100: 90, 1101: 10},
     )
     subject, body = daily_summary(record)
-    assert subject == "daily r1: OK"
+    assert subject == f"{OK_MARK} daily r1: OK"
     assert "Ingested 100 alerts from 2 chunk(s) into r1.parquet" in body
     assert "1100: 90, 1101: 10" in body
-    assert "Format change" not in body
-    assert "Skipped" not in body
+    assert "FORMAT CHANGE" not in body
+    assert "SKIPPED CHUNKS" not in body
 
 
 def test_daily_summary_reports_problems():
@@ -68,7 +68,7 @@ def test_daily_summary_reports_problems():
     failing = {"new.parquet": ("t3", "truncated"), "old.parquet": ("t1", "corrupt")}
     subject, body = daily_summary(record, failing, format_change={"nulled": {"diaSource.x": "bad cast"}})
 
-    assert subject == "daily r3: FORMAT CHANGE, 2 chunk(s) skipped"
+    assert subject == f"{PROBLEM_MARK} daily r3: FORMAT CHANGE, 2 chunk(s) skipped"
     assert "unknown: 5" in body
     assert "diaSource.x" in body
     assert "new.parquet: truncated" in body
