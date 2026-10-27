@@ -4,7 +4,8 @@ The state lives in its own directory (``rubin_alert_archive_v2/state/``),
 outside the catalog, so it survives the weekly re-import:
 
 - ``ingested.jsonl``: one line per daily run (see :class:`RunRecord`).
-  A chunk counts as ingested once a run lists it in ``chunks``.
+  A chunk counts as ingested once a run lists it in ``chunks``. The log is
+  always rewritten atomically, so a crash never leaves a partial line.
 - ``format_change.json``: present only while flagged. Its existence is the flag.
 - ``lock``: held while a daily or weekly job runs, so they never overlap.
 
@@ -143,17 +144,19 @@ class PipelineState:
         Call this only after the run's files are written, so a crash before
         then leaves its chunks unlisted and the next run retries them.
 
+        The whole log is rewritten atomically, so a crash leaves either the old
+        log or the new one, never a partial line. The log grows by one line
+        per run, so rewriting it is cheap.
+
         Raises
         ------
         ValueError
             If a run with the same ID is already in the log.
         """
-        if any(r.run_id == record.run_id for r in self.runs()):
+        runs = self.runs()
+        if any(r.run_id == record.run_id for r in runs):
             raise ValueError(f"run {record.run_id!r} is already in {self.log_path}")
-        with open(self.log_path, "a") as f:
-            f.write(record.to_json() + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        _write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in [*runs, record]))
 
     def reingest_runs(self, catalog_dir, run_ids, missing_files_ok: bool = False) -> list[RunRecord]:
         """Delete the catalog files that runs wrote and take the runs off the log.
@@ -172,6 +175,15 @@ class PipelineState:
         Every run is checked before anything is deleted. Files are deleted
         before the log is changed, so if this stops partway, the runs are
         still in the log and nothing is ingested twice.
+
+        This takes the pipeline lock (as job ``"reingest"``), so it can't run
+        while a daily or weekly job is writing the catalog or the log.
+
+        Only the runs' parquet files are deleted. The catalog's skymaps and
+        metadata (partition info, row counts) still count them until the next
+        weekly re-import rebuilds them. That's accepted: re-ingesting happens
+        only while the format-change flag is set, so nothing is published
+        from the working catalog in the meantime.
 
         Parameters
         ----------
@@ -198,26 +210,29 @@ class PipelineState:
             If a run that wrote files has none left in the catalog, most
             likely because the weekly re-import merged them, and
             ``missing_files_ok`` is False. Nothing is deleted or removed then.
+        LockHeldError
+            If another job holds the pipeline lock. Nothing is deleted or removed then.
         """
         catalog_dir = Path(catalog_dir)
-        runs = self._find_runs(run_ids)
-        files = {r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name}
-        merged = [run_id for run_id, paths in files.items() if not paths]
-        if merged and not missing_files_ok:
-            raise FileNotFoundError(
-                f"no Npix=*/<file> files in {catalog_dir} for runs {merged}. If the weekly "
-                "re-import merged them, re-ingesting would add their alerts a second time. "
-                "If you know they were deleted instead, pass missing_files_ok=True."
-            )
-        for path in (p for paths in files.values() for p in paths):
-            path.unlink()
-        return self._remove_runs(r.run_id for r in runs)
+        with self.lock("reingest"):
+            runs = self._find_runs(run_ids)
+            files = {r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name}
+            merged = [run_id for run_id, paths in files.items() if not paths]
+            if merged and not missing_files_ok:
+                raise FileNotFoundError(
+                    f"no Npix=*/<file> files in {catalog_dir} for runs {merged}. If the weekly "
+                    "re-import merged them, re-ingesting would add their alerts a second time. "
+                    "If you know they were deleted instead, pass missing_files_ok=True."
+                )
+            for path in (p for paths in files.values() for p in paths):
+                path.unlink()
+            return self._remove_runs(r.run_id for r in runs)
 
     def _remove_runs(self, run_ids) -> list[RunRecord]:
         """Take runs off the ingested log, so the next daily run ingests their chunks again.
 
-        Only :meth:`reingest_runs` should call this, after deleting the runs'
-        catalog files. Re-ingested chunks go into new files named by the new
+        Only :meth:`reingest_runs` should call this, holding the lock, after
+        deleting the runs' catalog files. Re-ingested chunks go into new files named by the new
         run ID, so any old files left in place would duplicate their alerts.
 
         The log is rewritten atomically: a reader sees either the old log or

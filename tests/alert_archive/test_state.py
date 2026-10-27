@@ -64,6 +64,14 @@ def write_catalog_files(catalog_dir, file_name, pixels):
     return paths
 
 
+
+def test_append_run_leaves_no_temp_file(tmp_path):
+    """The log is replaced atomically, so only the log itself is left in the state directory."""
+    state = PipelineState(tmp_path)
+    state.append_run(make_run("r1"))
+    state.append_run(make_run("r2"))
+    assert [p.name for p in tmp_path.iterdir()] == ["ingested.jsonl"]
+
 def test_reingest_runs_deletes_files_and_log_lines(tmp_path):
     """Only the chosen runs' files and log lines go; other runs and runs that wrote nothing are fine."""
     state = PipelineState(tmp_path / "state")
@@ -119,6 +127,19 @@ def test_reingest_unknown_run_changes_nothing(tmp_path):
     assert all(p.exists() for p in r1_files)
     assert [r.run_id for r in state.runs()] == ["r1"]
 
+
+
+def test_reingest_refuses_while_locked(tmp_path):
+    """Re-ingesting while a daily or weekly job holds the lock fails and changes nothing."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
+    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    with state.lock("daily"), pytest.raises(LockHeldError):
+        state.reingest_runs(catalog, ["r1"])
+    assert all(p.exists() for p in r1_files)
+    assert [r.run_id for r in state.runs()] == ["r1"]
+    assert not state.lock_path.exists()
 
 def test_failing_chunks_tracks_first_failure(tmp_path):
     """A chunk that keeps failing keeps its first failure time and its latest error.

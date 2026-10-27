@@ -97,6 +97,10 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
     errors, so the summary email can say how long a chunk has been failing.
     Only the input chunks count as ingested. Nightly files are named by run ID,
     not date, so a manual re-run can't overwrite an earlier run's files.
+    Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
+    takes it off the log, but leaves the skymaps and metadata stale until the
+    next weekly re-import rebuilds them. That's accepted because re-ingesting
+    only happens while the format-change flag is set, when nothing is published.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
     If a job dies without removing it, nothing breaks it automatically: the
