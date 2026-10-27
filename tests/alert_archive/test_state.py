@@ -187,3 +187,17 @@ def test_lock_released_on_error(tmp_path):
             raise RuntimeError("boom")
     with state.lock("daily"):
         pass
+
+
+def test_lock_failed_write_leaves_no_lock(tmp_path, monkeypatch):
+    """If writing the holder fails (e.g. disk full), no lock is left behind to block the next job."""
+    state = PipelineState(tmp_path)
+
+    def fail_dump(obj, f):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("alert_archive.state.json.dump", fail_dump)
+    with pytest.raises(OSError, match="No space"):
+        with state.lock("daily"):
+            pass
+    assert not state.lock_path.exists()

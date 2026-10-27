@@ -374,9 +374,10 @@ class PipelineState:
                 f"{self.lock_path} is held by {self.lock_path.read_text().strip()}. "
                 "If that job is no longer running, delete the file."
             ) from None
-        with os.fdopen(fd, "w") as f:
-            json.dump(holder, f)
         try:
+            # Inside the try, so a failed write (e.g. disk full) doesn't leave an empty lock behind.
+            with os.fdopen(fd, "w") as f:
+                json.dump(holder, f)
             yield
         finally:
             self.lock_path.unlink(missing_ok=True)
