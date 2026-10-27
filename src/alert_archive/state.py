@@ -14,7 +14,7 @@ Nothing here catches errors or sends email; the jobs decide what to do.
 import json
 import os
 import socket
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -290,7 +290,7 @@ class PipelineState:
     # ---------- lock ----------
 
     @contextmanager
-    def lock(self, job: str) -> Iterator[None]:
+    def lock(self, job: str) -> Generator[None]:
         """Hold the pipeline lock while the ``with`` block runs.
 
         The lock file records who holds it. It is removed on exit, also when
