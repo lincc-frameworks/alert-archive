@@ -55,8 +55,9 @@ def avro_to_arrow(avro_schema: dict) -> pa.Schema:
     - records, arrays and primitive types (``long``, ``float``, ...);
     - optional fields, which Avro writes as a list of ``"null"`` and one other
       type, e.g. ``{"name": "snr", "type": ["null", "float"]}``;
-    - references to a record defined earlier, by its name, e.g.
-      ``{"type": "array", "items": "diaSource"}``.
+    - references to a record defined earlier, by its short name, e.g.
+      ``{"type": "array", "items": "diaSource"}``. A fully qualified name
+      such as ``"lsst.v11_1.diaSource"`` raises.
 
     Parameters
     ----------
@@ -179,10 +180,10 @@ def infer_schema_id(schema: pa.Schema) -> int | None:
     """Guess the format of alerts from their columns.
 
     Stands in for a real per-alert ``schemaId`` until the converter writes
-    one. The columns (names and types at every level, ignoring nullability)
-    are compared with each known format. 1000 and 1100 differ only in
-    nullability, so they can't be told apart, and the newest match (1100) is
-    returned.
+    one. The columns' names and leaf types are compared with each known
+    format, ignoring nullability, list nesting and field order. 1000 and 1100
+    differ only in nullability, so they can't be told apart, and the newest
+    match (1100) is returned.
 
     Parameters
     ----------
@@ -270,6 +271,9 @@ def conform_alerts(table: pa.Table) -> tuple[pa.Table, ConformReport]:
     null if they can't be. :data:`EXCLUDED_COLUMNS` are dropped without being
     reported. If there's no ``schemaId`` column, one is added with the
     format inferred by :func:`infer_schema_id`.
+
+    Expects a whole input chunk. A slice of a larger table gives the right
+    result, but list columns are converted in full, not just the slice's rows.
 
     Parameters
     ----------
