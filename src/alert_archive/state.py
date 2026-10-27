@@ -214,7 +214,30 @@ class PipelineState:
         return self._remove_runs(r.run_id for r in runs)
 
     def _remove_runs(self, run_ids) -> list[RunRecord]:
-        """Take runs off the ingested log and return them. Their catalog files must already be gone."""
+        """Take runs off the ingested log, so the next daily run ingests their chunks again.
+
+        Only :meth:`reingest_runs` should call this, after deleting the runs'
+        catalog files. Re-ingested chunks go into new files named by the new
+        run ID, so any old files left in place would duplicate their alerts.
+
+        The log is rewritten atomically: a reader sees either the old log or
+        the new one, never a partial file.
+
+        Parameters
+        ----------
+        run_ids : iterable of str
+            IDs of the runs to remove.
+
+        Returns
+        -------
+        list[RunRecord]
+            The removed runs' records, in log order.
+
+        Raises
+        ------
+        KeyError
+            If any of the IDs isn't in the log. Nothing is removed then.
+        """
         removed = self._find_runs(run_ids)
         removed_ids = {r.run_id for r in removed}
         kept = [r for r in self.runs() if r.run_id not in removed_ids]
@@ -222,7 +245,23 @@ class PipelineState:
         return removed
 
     def _find_runs(self, run_ids) -> list[RunRecord]:
-        """The log's runs with these IDs, in log order. Raises KeyError if any is missing."""
+        """Look up runs in the ingested log by ID.
+
+        Parameters
+        ----------
+        run_ids : iterable of str
+            IDs of the runs to look up.
+
+        Returns
+        -------
+        list[RunRecord]
+            The log's records for those runs, in the order they appear in the log.
+
+        Raises
+        ------
+        KeyError
+            If any of the IDs isn't in the log.
+        """
         run_ids = set(run_ids)
         runs = [r for r in self.runs() if r.run_id in run_ids]
         missing = run_ids - {r.run_id for r in runs}
