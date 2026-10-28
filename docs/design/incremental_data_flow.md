@@ -127,10 +127,18 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 
 - **Notification:** email via `mail`, to a configurable list of recipients.
   It starts with olynn@andrew.cmu.edu; others can be added as wanted.
-- **Safe re-runs:** after writing, the daily run recomputes row counts and
-  max rows from the parquet footers on disk rather than adding to the old
-  totals (unlike ppdb_hats). A run that crashes and is repeated can't
-  double-count rows in the metadata.
+- **Safe re-runs:** after writing, the daily run recomputes the metadata from
+  the files on disk rather than adding to the old totals (unlike ppdb_hats):
+  the pixel list from the leaf directories, row counts and max rows from the
+  parquet footers, and the skymaps from each file's spatial index column. A
+  run that crashes and is repeated can't double-count rows, and runs deleted
+  by a re-ingest drop out at the next update. The skymap rebuild reads the
+  whole catalog every night (about 4 s for 16.5M rows of ra/dec today).
+  How it scales is tracked in an issue ([#22](https://github.com/lincc-frameworks/alert-archive/issues/22)).
+- **Orphaned files:** a run that crashes after writing its files but before
+  adding itself to `ingested.jsonl` leaves files that no run owns. Its chunks
+  get ingested again next time, so the daily run deletes leaf files whose
+  names aren't in the log (or the baseline) before it ingests.
 
 ### Accepted trade-offs (for now)
 
