@@ -131,10 +131,12 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Safe re-runs:** after writing, the daily run recomputes the metadata from
   the files on disk rather than adding to the old totals (unlike ppdb_hats):
   the pixel list from the leaf directories, row counts and max rows from the
-  parquet footers, and the skymaps from each file's spatial index column. A
+  parquet footers, `_metadata` and the per-partition column statistics from
+  the same footers, and the skymaps from each file's spatial index column. A
   run that crashes and is repeated can't double-count rows, and runs deleted
-  by a re-ingest drop out at the next update. The skymap rebuild reads the
-  whole catalog every night (about 4 s for 16.5M rows of ra/dec today).
+  by a re-ingest drop out at the next update. The rebuild reads the whole
+  catalog every night: about 4 s for the skymaps (16.5M rows of ra/dec) and
+  2 s for the parquet metadata (227 files) today.
   How it scales is tracked in an issue ([#22](https://github.com/lincc-frameworks/alert-archive/issues/22)).
 - **Orphaned files:** a run that crashes after writing its files but before
   adding itself to `ingested.jsonl` leaves files that no run owns. Its chunks
@@ -161,8 +163,6 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
     re-ingest or the orphan cleanup, can hit `FileNotFoundError`. Reopening
     the catalog fixes it.
   - While the format-change flag is set, users see the best-effort rows.
-  - `_metadata` and `per_partition_statistics.parquet` are missing between
-    the first daily run and the next weekly re-import.
 
 ## Open questions
 

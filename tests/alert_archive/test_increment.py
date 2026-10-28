@@ -2,9 +2,9 @@ import hats
 import lsdb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from alert_archive.daily.increment import (
-    PER_PARTITION_STATISTICS,
     find_orphan_files,
     leaf_files,
     remove_orphan_files,
@@ -142,18 +142,25 @@ def test_deleted_run_files_drop_out(base_dir):
     assert read_skymap(catalog, catalog.catalog_info.skymap_order).sum() == 200
 
 
-def test_update_metadata_removes_stale_files(base_dir):
-    """``_metadata`` and the per-partition statistics are deleted; provenance is kept."""
-    assert paths.get_parquet_metadata_pointer(base_dir).exists()
-    assert (base_dir / PER_PARTITION_STATISTICS).exists()
-    catalog = hats.read_hats(base_dir)
-    update_metadata(catalog)
+def test_update_metadata_rewrites_parquet_metadata(base_dir):
+    """``_metadata`` and the per-partition statistics cover the new run; provenance is kept."""
+    add_run(base_dir, "run1", make_catalog(1000, 100, (45, 180), seed=1))
 
-    assert not paths.get_parquet_metadata_pointer(base_dir).exists()
-    assert not (base_dir / PER_PARTITION_STATISTICS).exists()
-    updated = hats.read_hats(base_dir).catalog_info
-    assert updated.catalog_name == catalog.catalog_info.catalog_name
-    assert updated.npix_suffix == "/"
+    assert pq.read_metadata(paths.get_parquet_metadata_pointer(base_dir)).num_rows == 300
+    catalog = hats.read_hats(base_dir)
+    stats = catalog.per_partition_statistics(include_columns=["id"], include_stats=["row_count"])
+    assert stats["id: row_count"].astype(int).sum() == 300
+    # One row per pixel, not per file: lsdb lines them up with the partitions.
+    assert len(stats) == len(catalog.get_healpix_pixels())
+    assert catalog.catalog_info.catalog_name == "from_lsdb_dataframe"
+    assert catalog.catalog_info.npix_suffix == "/"
+
+
+def test_sample_after_increment(base_dir):
+    """``Catalog.sample`` reads the per-partition statistics, so it works after an increment."""
+    add_run(base_dir, "run1", make_catalog(1000, 100, (45, 180), seed=1))
+    sample = lsdb.open_catalog(base_dir).sample(50, seed=0)
+    assert 0 < len(sample) <= 300
 
 
 def test_update_metadata_empty_catalog(base_dir):

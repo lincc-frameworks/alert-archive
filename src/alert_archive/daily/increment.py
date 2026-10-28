@@ -4,7 +4,7 @@ Adapted from ``ppdb_hats/daily/increment.py`` in ppdb_hats
 (https://github.com/astronomy-commons/ppdb_hats, commit 241b4f2), with one
 change: the skymaps and metadata are recomputed from the files on disk instead
 of adding the new run's numbers to the old totals. A run that crashes after
-writing and is repeated, or whose files 
+writing and is repeated, or whose files
 :meth:`~alert_archive.state.PipelineState.reingest_runs` deleted, then can't
 leave the counts wrong.
 
@@ -20,6 +20,7 @@ import pyarrow.parquet as pq
 from hats.catalog import PartitionInfo
 from hats.io import paths
 from hats.io.file_io import write_fits_image
+from hats.io.parquet_metadata import write_parquet_metadata
 from hats.io.skymap import write_skymap
 from hats.pixel_math import HealpixPixel
 from hats.pixel_math.healpix_shim import order2npix
@@ -32,9 +33,6 @@ from lsdb.io.to_hats import (
 from lsdb.io.to_hats import write_partitions as lsdb_write_partitions
 
 logger = logging.getLogger(__name__)
-
-PER_PARTITION_STATISTICS = "per_partition_statistics.parquet"
-"""Column statistics file that hats writes next to ``_metadata``. It goes stale with each increment."""
 
 
 def write_partitions(catalog, *, base_catalog_dir, histogram_order, parquet_name, **kwargs):
@@ -138,8 +136,10 @@ def update_metadata(existing_catalog):
 
     ``partition_info.csv`` lists every pixel directory that has files, and
     ``hats.properties`` gets row counts summed from the parquet footers.
-    ``_metadata`` and ``per_partition_statistics.parquet`` are deleted, since
-    their statistics are outdated; the weekly re-import rewrites them.
+    ``dataset/_metadata``, ``dataset/_common_metadata`` and
+    ``per_partition_statistics.parquet`` are rewritten from those footers too.
+    lsdb reads the statistics, e.g. in ``Catalog.sample``, so they must cover
+    every file.
 
     Parameters
     ----------
@@ -160,14 +160,14 @@ def update_metadata(existing_catalog):
     if not counts:
         raise ValueError(f"no parquet files in {catalog_base_dir}")
 
-    # Delete _metadata and the column statistics, since they are outdated
-    paths.get_parquet_metadata_pointer(catalog_base_dir).unlink(missing_ok=True)
-    (paths.get_upath(catalog_base_dir) / PER_PARTITION_STATISTICS).unlink(missing_ok=True)
-
     # Update `partition_info.csv` with new set of pixels
     partition_info = PartitionInfo.from_healpix(list(counts))
     partition_info_file = paths.get_partition_info_pointer(catalog_base_dir)
     partition_info.write_to_file(partition_info_file)
+
+    # Rewrite `_metadata`, `_common_metadata` and the column statistics.
+    # Before the properties, so their size estimate includes these files.
+    write_parquet_metadata(catalog_base_dir, create_per_partition_stats=True)
 
     # Update the `hats.properties`
     new_hc_structure = create_modified_catalog_structure(
