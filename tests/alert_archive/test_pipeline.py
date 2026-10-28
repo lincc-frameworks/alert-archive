@@ -16,12 +16,13 @@ class RecordingPipeline(Pipeline):
 def test_execute_runs_with_client_and_tmp_dir():
     """``execute`` passes a live client, an existing temp dir and its own arguments to ``run``."""
     config = get_default_config(dask=DaskConfig(n_workers=1, memory_limit="1GiB"))
-    client, tmp_dir, existed, args, kwargs = RecordingPipeline(config).execute(1, key="value")
+    result = RecordingPipeline(config).execute(42, key="value")
+    client, tmp_dir, tmp_dir_existed_during_run, args, kwargs = result
 
     assert isinstance(client, Client)
-    assert existed
+    assert tmp_dir_existed_during_run
     assert not tmp_dir.exists()
-    assert args == (1,)
+    assert args == (42,)
     assert kwargs == {"key": "value"}
     assert logging.getLogger("alert_archive").level == logging.INFO
 
