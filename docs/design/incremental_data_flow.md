@@ -59,6 +59,7 @@ flowchart TD
     PUB[("Published collection<br/>lsdb_commissioning/rubin_alert_archive_v2/")]
     W3 --> PUB
     PUB --> USERS["Users, nightly benchmarks"]
+    WORK -.->|"daily updates<br/>(stale margin + index)"| USERS
 
     %% ---------- styling ----------
     classDef reuse fill:#d7ecd9,stroke:#2e7d32,color:#000
@@ -147,7 +148,21 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   Pixels keep growing until the weekly re-import, and longer if a
   format-change flag makes it skip.
 - **Stale margin and index are acceptable for now.** They are rebuilt only by
-  the weekly re-import.
+  the weekly re-import. Users reading the working catalog between re-imports
+  can miss crossmatches with new alerts near pixel boundaries, and
+  `id_search` by `diaSourceId` doesn't find alerts added since the last
+  re-import.
+- **Users read the working catalog directly.** It is updated daily, with no
+  snapshot in between, so readers see the run as it happens:
+  - While a daily run is writing, new files in existing pixels show up at
+    once, but new pixels, row counts and skymaps catch up only when the run
+    updates the metadata at its end.
+  - A reader that opened the catalog before files were deleted, by a
+    re-ingest or the orphan cleanup, can hit `FileNotFoundError`. Reopening
+    the catalog fixes it.
+  - While the format-change flag is set, users see the best-effort rows.
+  - `_metadata` and `per_partition_statistics.parquet` are missing between
+    the first daily run and the next weekly re-import.
 
 ## Open questions
 
