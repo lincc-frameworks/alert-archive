@@ -184,6 +184,13 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   - A reader that opened the catalog before files were deleted, by a
     re-ingest or the orphan cleanup, can hit `FileNotFoundError`. Reopening
     the catalog fixes it.
+  - The metadata files (`partition_info.csv`, `hats.properties`,
+    `_metadata`, `_common_metadata`, `per_partition_statistics.parquet` and
+    the skymaps) are overwritten in place. A reader that opens the catalog
+    while one is being written, a window of a few seconds per night, can
+    get a parse error or miss pixels. Reopening fixes it. Writing each file
+    to a temporary name and renaming it into place would close this, but we
+    think it isn't worth the extra code yet. Followed up in an issue (#24).
 
 ## Open questions
 
