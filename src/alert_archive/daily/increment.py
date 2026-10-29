@@ -44,9 +44,10 @@ def write_partitions(catalog, *, base_catalog_dir, histogram_order, parquet_name
     Parameters
     ----------
     catalog
-        LSDB catalog with partitions to write.
+        LSDB catalog of the new alerts to add, partitioned to match the
+        existing catalog's pixels (hats-import's ``existing_pixels``).
     base_catalog_dir
-        Base HATS catalog path.
+        Base path of the existing HATS catalog to write into.
     histogram_order : int
         HEALPix order for histogram calculations.
     parquet_name : str
@@ -117,13 +118,16 @@ def update_skymaps(existing_catalog):
     logger.info("Updating skymaps...")
     catalog_base_dir = existing_catalog.catalog_path
     info = existing_catalog.catalog_info
-    order = info.skymap_order
-    shift = 2 * (info.healpix_order - order)
+    skymap_order = info.skymap_order
+    # Nested HEALPix: each order down splits a pixel in 4 (2 bits), so the
+    # skymap pixel is the spatial index with 2 bits per order dropped.
+    shift = 2 * (info.healpix_order - skymap_order)
 
-    histogram = np.zeros(order2npix(order), dtype=np.int64)
-    for path in (p for files in leaf_files(catalog_base_dir).values() for p in files):
-        spatial_index = pq.read_table(path, columns=[info.healpix_column])[info.healpix_column]
-        histogram += np.bincount(spatial_index.to_numpy() >> shift, minlength=len(histogram))
+    histogram = np.zeros(order2npix(skymap_order), dtype=np.int64)
+    for pixel_files in leaf_files(catalog_base_dir).values():
+        for path in pixel_files:
+            spatial_index = pq.read_table(path, columns=[info.healpix_column])[info.healpix_column]
+            histogram += np.bincount(spatial_index.to_numpy() >> shift, minlength=len(histogram))
 
     # Write skymaps to point_map.fits and skymap_*.fits
     map_file_path = paths.get_point_map_file_pointer(catalog_base_dir)
@@ -153,20 +157,21 @@ def update_metadata(existing_catalog):
     """
     logger.info("Updating metadata...")
     catalog_base_dir = existing_catalog.catalog_path
-    counts = {
+    rows_per_pixel = {
         pixel: sum(pq.read_metadata(path).num_rows for path in files)
         for pixel, files in leaf_files(catalog_base_dir).items()
     }
-    if not counts:
+    if not rows_per_pixel:
         raise ValueError(f"no parquet files in {catalog_base_dir}")
 
     # Update `partition_info.csv` with new set of pixels
-    partition_info = PartitionInfo.from_healpix(list(counts))
+    partition_info = PartitionInfo.from_healpix(list(rows_per_pixel.keys()))
     partition_info_file = paths.get_partition_info_pointer(catalog_base_dir)
     partition_info.write_to_file(partition_info_file)
 
     # Rewrite `_metadata`, `_common_metadata` and the column statistics.
-    # Before the properties, so their size estimate includes these files.
+    # This runs before `hats.properties` is updated below, so that its
+    # `hats_estsize` (the catalog's size on disk) includes these files.
     write_parquet_metadata(catalog_base_dir, create_per_partition_stats=True)
 
     # Update the `hats.properties`
@@ -174,8 +179,8 @@ def update_metadata(existing_catalog):
         existing_catalog,
         catalog_base_dir,
         existing_catalog.catalog_name,
-        total_rows=sum(counts.values()),
-        hats_max_rows=max(counts.values()),
+        total_rows=sum(rows_per_pixel.values()),
+        hats_max_rows=max(rows_per_pixel.values()),
         hats_order=partition_info.get_highest_order(),
         moc_sky_fraction=round(partition_info.calculate_fractional_coverage(), 5),
         **new_provenance_properties(catalog_base_dir, inherit_provenance=True),
