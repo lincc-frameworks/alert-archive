@@ -2,9 +2,12 @@ import hats
 import lsdb
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from alert_archive.daily.increment import (
+    SchemaMismatchError,
+    check_schema,
     find_orphan_files,
     leaf_files,
     remove_orphan_files,
@@ -53,14 +56,12 @@ def base_dir(tmp_path):
 def add_run(catalog_dir, run_id, catalog):
     """Write ``catalog`` as one run, then update skymaps and metadata like a daily run does."""
     existing = hats.read_hats(catalog_dir)
-    write_partitions(
-        catalog,
-        base_catalog_dir=existing.catalog_base_dir,
-        histogram_order=existing.catalog_info.skymap_order,
-        parquet_name=f"{run_id}.parquet",
+    rows_written = write_partitions(
+        catalog, base_catalog_dir=existing.catalog_base_dir, parquet_name=f"{run_id}.parquet"
     )
     update_skymaps(existing)
     update_metadata(existing)
+    return rows_written
 
 
 def expected_skymap(catalog_dir, order):
@@ -161,6 +162,86 @@ def test_sample_after_increment(base_dir):
     add_run(base_dir, "run1", make_catalog(1000, 100, (45, 180), seed=1))
     sample = lsdb.open_catalog(base_dir).sample(50, seed=0)
     assert 0 < len(sample) <= 300
+
+
+def test_write_partitions_returns_rows_per_pixel(base_dir):
+    """The rows written per pixel add up to the new alerts, and match the one-row-group files on disk."""
+    rows_written = add_run(base_dir, "run1", make_catalog(1000, 100, (45, 180), seed=1))
+    assert sum(rows_written.values()) == 100
+    assert all(rows > 0 for rows in rows_written.values())
+    for pixel, rows in rows_written.items():
+        (path,) = (p for p in leaf_files(base_dir)[pixel] if p.name == "run1.parquet")
+        assert pq.read_metadata(path).num_rows == rows
+        assert pq.read_metadata(path).num_row_groups == 1
+
+
+def test_write_partitions_refuses_schema_change(base_dir):
+    """New alerts with an extra column fail before any file is written."""
+    catalog = make_catalog(1000, 100, (45, 180), seed=1)
+    catalog = catalog.map_partitions(lambda df: df.assign(extra=1.0))
+    with pytest.raises(SchemaMismatchError, match=r"Added: \['extra'\]"):
+        write_partitions(catalog, base_catalog_dir=base_dir, parquet_name="run1.parquet")
+    assert not list(base_dir.glob("dataset/**/run1.parquet"))
+
+
+def test_write_partitions_casts_nullability(base_dir):
+    """New files get the catalog's nullability, so their footers can be combined with the old ones."""
+    common = paths.get_common_metadata_pointer(base_dir)
+    schema = pq.read_schema(common)
+    strict = schema.set(schema.get_field_index("id"), schema.field("id").with_nullable(False))
+    pq.write_metadata(strict, common)
+
+    write_partitions(
+        make_catalog(1000, 100, (45, 180), seed=1), base_catalog_dir=base_dir, parquet_name="run1.parquet"
+    )
+    for path in base_dir.glob("dataset/**/run1.parquet"):
+        assert not pq.read_schema(path).field("id").nullable
+
+
+def test_update_metadata_mixed_schemas_keeps_counts(base_dir):
+    """If the footers can't be combined, the pixels and row counts are already up to date."""
+    pixel_dir = base_dir / "dataset" / "Norder=2" / "Dir=0" / "Npix=100"
+    pixel_dir.mkdir(parents=True)
+    pq.write_table(pa.table({"id": [1, 2], "other": [1.0, 2.0]}), pixel_dir / "stray.parquet")
+
+    with pytest.raises(RuntimeError, match="equal schemas"):
+        update_metadata(hats.read_hats(base_dir))
+    catalog = hats.read_hats(base_dir)
+    assert catalog.catalog_info.total_rows == 202
+    assert HealpixPixel(ORDER, 100) in catalog.get_healpix_pixels()
+
+
+NESTED = pa.struct([("a", pa.list_(pa.float64())), ("b", pa.list_(pa.float64()))])
+
+
+@pytest.mark.parametrize(
+    ("actual", "match"),
+    [
+        pytest.param(
+            pa.struct([*NESTED, ("c", pa.list_(pa.float64()))]),
+            r"Added: \['s.c\[list\]'\]",
+            id="added subfield",
+        ),
+        pytest.param(pa.struct([NESTED.field(0)]), r"Missing: \['s.b\[list\]'\]", id="missing subfield"),
+        pytest.param(
+            pa.struct([NESTED.field(0), ("b", pa.list_(pa.float32()))]),
+            r"Changed: \['s.b\[list\]: double -> float'\]",
+            id="changed type",
+        ),
+    ],
+)
+def test_check_schema_nested_differences(actual, match):
+    """Nested changes raise; a plain cast would silently drop or null them."""
+    with pytest.raises(SchemaMismatchError, match=match):
+        check_schema(pa.schema([("s", actual)]), pa.schema([("s", NESTED)]))
+
+
+def test_check_schema_ignores_nullability_and_order():
+    """The same fields in another order, or with other nullability, pass; cast fixes both."""
+    expected = pa.schema([pa.field("id", pa.int64(), nullable=False), ("s", NESTED)])
+    check_schema(
+        pa.schema([("s", pa.struct([NESTED.field(1), NESTED.field(0)])), ("id", pa.int64())]), expected
+    )
 
 
 def test_update_metadata_empty_catalog(base_dir):

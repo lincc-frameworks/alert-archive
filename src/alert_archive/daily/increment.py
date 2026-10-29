@@ -1,12 +1,17 @@
 """Write a daily increment into the working catalog and bring its metadata up to date.
 
 Adapted from ``ppdb_hats/daily/increment.py`` in ppdb_hats
-(https://github.com/astronomy-commons/ppdb_hats, commit 241b4f2), with one
-change: the skymaps and metadata are recomputed from the files on disk instead
-of adding the new run's numbers to the old totals. A run that crashes after
-writing and is repeated, or whose files
-:meth:`~alert_archive.state.PipelineState.reingest_runs` deleted, then can't
-leave the counts wrong.
+(https://github.com/astronomy-commons/ppdb_hats, commit 241b4f2), with two
+changes:
+
+- The skymaps and metadata are recomputed from the files on disk instead of
+  adding the new run's numbers to the old totals. A run that crashes after
+  writing and is repeated, or whose files
+  :meth:`~alert_archive.state.PipelineState.reingest_runs` deleted, then
+  can't leave the counts wrong.
+- New partitions are checked against the catalog's schema and cast to it
+  before they are written, so every file shares one schema. A schema change
+  fails before anything is written, rather than when the footers are combined.
 
 The catalog must use leaf pixel directories (``npix_suffix="/"``), with one
 parquet file per run in each ``Npix=<pixel>/`` directory it touched.
@@ -17,21 +22,19 @@ import re
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 from hats.catalog import PartitionInfo
 from hats.io import paths
 from hats.io.file_io import write_fits_image
+from hats.io.file_io.file_io import get_parquet_write_table_kwargs
 from hats.io.parquet_metadata import write_parquet_metadata
 from hats.io.skymap import write_skymap
 from hats.pixel_math import HealpixPixel
 from hats.pixel_math.healpix_shim import order2npix
 from lsdb.io.common import new_provenance_properties
-from lsdb.io.to_hats import (
-    create_modified_catalog_structure,
-    remove_done_files,
-    remove_histogram_files,
-)
-from lsdb.io.to_hats import write_partitions as lsdb_write_partitions
+from lsdb.io.to_hats import create_modified_catalog_structure
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +45,25 @@ The IDs are UTC timestamps of fixed width, so sorting the names sorts the runs b
 """
 
 
-def write_partitions(catalog, *, base_catalog_dir, histogram_order, parquet_name, **kwargs):
-    """Write all catalog partitions to disk as parquet files.
+class SchemaMismatchError(ValueError):
+    """Raised when new alerts don't have the catalog's columns and types."""
+
+
+def write_partitions(catalog, *, base_catalog_dir, parquet_name) -> dict:
+    """Write all catalog partitions into the existing catalog as parquet files.
 
     Each partition is written to its leaf pixel directory as
-    ``Npix=<pixel>/<parquet_name>`` with LSDB's partition writer.
+    ``Npix=<pixel>/<parquet_name>``, with the existing catalog's schema from
+    ``dataset/_common_metadata``. Every file in the catalog then has the same
+    schema, which :func:`update_metadata` needs to combine their footers.
+
+    The new alerts' columns and types are checked against that schema before
+    anything is written. Only nullability and field order may differ; they
+    are cast to match.
+
+    Each file is one row group. Nightly files are small, and more row groups
+    would only grow ``_metadata`` and the column statistics. The row-group
+    layout of the long-lived files is left to the weekly merge.
 
     Parameters
     ----------
@@ -55,38 +72,119 @@ def write_partitions(catalog, *, base_catalog_dir, histogram_order, parquet_name
         existing catalog's pixels (hats-import's ``existing_pixels``).
     base_catalog_dir
         Base path of the existing HATS catalog to write into.
-    histogram_order : int
-        HEALPix order for histogram calculations.
     parquet_name : str
         Name of the parquet file in each pixel directory (e.g., ``"20261027T031500Z.parquet"``).
-    **kwargs
-        Additional keyword arguments passed to ``to_parquet``.
 
     Returns
     -------
-    tuple
-        Tuple of ``(new_pixels, new_counts, new_histograms)`` where:
-        - ``new_pixels`` is a list of new HEALPix pixel objects written.
-        - ``new_counts`` is a list of row counts for each partition.
-        - ``new_histograms`` is a list of ``SparseHistogram`` objects.
-        :func:`update_skymaps` and :func:`update_metadata` don't use them,
-        since they recompute everything from disk.
+    dict[HealpixPixel, int]
+        Number of rows written to each pixel. Empty partitions write no files
+        and are left out.
+
+    Raises
+    ------
+    SchemaMismatchError
+        If the new alerts have columns or types the catalog doesn't, or lack
+        some it has. Nothing is written then.
     """
     logger.info("Writing partitions...")
-    try:
-        return lsdb_write_partitions(
-            catalog,
-            base_catalog_dir,
-            histogram_order,
-            npix_suffix="/",
-            npix_parquet_name=parquet_name,
-            progress_bar=False,
-            **kwargs,
-        )
-    finally:
-        # Cleanup resume state files that LSDB writes in the catalog directory.
-        remove_histogram_files(base_catalog_dir)
-        remove_done_files(base_catalog_dir)
+    schema = pq.read_schema(paths.get_common_metadata_pointer(base_catalog_dir))
+    check_schema(catalog.meta.to_pyarrow().schema, schema)
+
+    results = catalog.map_partitions(
+        _write_partition,
+        paths.get_upath(base_catalog_dir),
+        parquet_name,
+        schema,
+        include_pixel=True,
+        meta=pd.DataFrame(
+            {"order": pd.Series(dtype=int), "pixel": pd.Series(dtype=int), "rows": pd.Series(dtype=int)}
+        ),
+    ).compute(progress_bar=False)
+    return {
+        HealpixPixel(order, pixel): rows
+        for order, pixel, rows in zip(results["order"], results["pixel"], results["rows"], strict=True)
+        if rows
+    }
+
+
+def _write_partition(df, pixel, base_catalog_dir, parquet_name, schema) -> pd.DataFrame:
+    """Write one partition as ``Npix=<pixel>/<parquet_name>``, cast to ``schema``.
+
+    Follows LSDB's own partition writer (``lsdb.io.common.write_partition_parquet``),
+    with the schema check and cast added. Returns the pixel and its row count.
+    """
+    result = pd.DataFrame({"order": [pixel.order], "pixel": [pixel.pixel], "rows": [len(df)]})
+    if len(df) == 0:
+        return result
+    table = df.to_pyarrow()
+
+    # Rechecked per partition, since data can differ from the catalog's meta. check_schema
+    # refuses real changes (cast would silently drop or null-fill them); cast then fixes
+    # only nullability and order, which _metadata needs to match exactly.
+    check_schema(table.schema, schema)
+    table = table.select(schema.names).cast(schema)
+
+    pixel_path = paths.new_pixel_catalog_file(
+        base_catalog_dir, pixel, create_dirs=True, npix_suffix="/", npix_parquet_name=parquet_name
+    )
+    # One row group per file; hats' default would split every 100k rows.
+    write_kwargs = get_parquet_write_table_kwargs(table.schema, write_table_kwargs={"row_group_size": len(table)})
+    pq.write_table(table, pixel_path.path, filesystem=pixel_path.fs, **write_kwargs)
+    return result
+
+
+def check_schema(actual: pa.Schema, expected: pa.Schema):
+    """Raise unless two schemas have the same columns and types, nested ones included.
+
+    Nullability and field order are ignored, since selecting the columns and
+    :meth:`pyarrow.Table.cast` fix them. Every field's path and type must
+    match. ``cast`` alone isn't enough: it matches struct fields by name,
+    silently dropping fields the target lacks and filling missing ones with
+    nulls.
+
+    Raises
+    ------
+    SchemaMismatchError
+        If any column or nested field is added, missing or of another type.
+    """
+    actual_fields, expected_fields = _field_types(actual), _field_types(expected)
+    if actual_fields == expected_fields:
+        return
+    added = sorted(actual_fields.keys() - expected_fields.keys())
+    missing = sorted(expected_fields.keys() - actual_fields.keys())
+    changed = sorted(
+        f"{path}: {expected_fields[path]} -> {actual_fields[path]}"
+        for path in actual_fields.keys() & expected_fields.keys()
+        if actual_fields[path] != expected_fields[path]
+    )
+    raise SchemaMismatchError(
+        f"new alerts don't match the catalog's schema. Added: {added}. Missing: {missing}. "
+        f"Changed: {changed}. A schema change needs a re-import of the catalog."
+    )
+
+
+def _field_types(schema: pa.Schema) -> dict[str, str]:
+    """Map each nested field's dotted path to its type, ignoring nullability.
+
+    Structs add ``.<name>`` to the path and lists add ``[list]`` or ``[large_list]``,
+    so turning a list into a plain value counts as a change.
+    """
+    fields = {}
+
+    def visit(path: str, data_type: pa.DataType):
+        if pa.types.is_struct(data_type):
+            for i in range(data_type.num_fields):
+                visit(f"{path}.{data_type.field(i).name}", data_type.field(i).type)
+        elif pa.types.is_list(data_type) or pa.types.is_large_list(data_type):
+            kind = "large_list" if pa.types.is_large_list(data_type) else "list"
+            visit(f"{path}[{kind}]", data_type.value_type)
+        else:
+            fields[path] = str(data_type)
+
+    for field in schema:
+        visit(field.name, field.type)
+    return fields
 
 
 def leaf_files(catalog_dir) -> dict[HealpixPixel, list[Path]]:
@@ -150,7 +248,8 @@ def update_metadata(existing_catalog):
     ``dataset/_metadata``, ``dataset/_common_metadata`` and
     ``per_partition_statistics.parquet`` are rewritten from those footers too.
     lsdb reads the statistics, e.g. in ``Catalog.sample``, so they must cover
-    every file.
+    every file. They are written last, since combining the footers needs every
+    file to share one schema (see :func:`write_partitions`).
 
     Parameters
     ----------
@@ -161,6 +260,9 @@ def update_metadata(existing_catalog):
     ------
     ValueError
         If the catalog has no parquet files.
+    RuntimeError
+        From pyarrow, if the files' schemas differ. ``partition_info.csv`` and
+        ``hats.properties`` are already updated then.
     """
     logger.info("Updating metadata...")
     catalog_base_dir = existing_catalog.catalog_path
@@ -176,11 +278,6 @@ def update_metadata(existing_catalog):
     partition_info_file = paths.get_partition_info_pointer(catalog_base_dir)
     partition_info.write_to_file(partition_info_file)
 
-    # Rewrite `_metadata`, `_common_metadata` and the column statistics.
-    # This runs before `hats.properties` is updated below, so that its
-    # `hats_estsize` (the catalog's size on disk) includes these files.
-    write_parquet_metadata(catalog_base_dir, create_per_partition_stats=True)
-
     # Update the `hats.properties`
     new_hc_structure = create_modified_catalog_structure(
         existing_catalog,
@@ -193,6 +290,12 @@ def update_metadata(existing_catalog):
         **new_provenance_properties(catalog_base_dir, inherit_provenance=True),
     )
     new_hc_structure.catalog_info.to_properties_file(catalog_base_dir)
+
+    # Rewrite `_metadata`, `_common_metadata` and the column statistics last.
+    # Combining the footers fails if any files' schemas differ, and by then the
+    # pixels and row counts above are already right. `hats_estsize` above still
+    # counts the previous run's copies of these files, which is close enough.
+    write_parquet_metadata(catalog_base_dir, create_per_partition_stats=True)
 
 
 def find_orphan_files(catalog_dir, known_file_names) -> list[Path]:

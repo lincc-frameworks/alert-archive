@@ -29,10 +29,10 @@ flowchart TD
     subgraph DAILY["Daily pipeline (this repo)"]
         D1["Find unprocessed batches<br/>(compare with ingested-file list)"]
         D2["AlertReader transform<br/>add ra/dec, struct → nested, drop cutouts"]
-        D3["Cast to catalog columns (1101)<br/>best effort for unknown formats"]
+        D3["Cast to catalog columns (1101)<br/>stop before writing on unknown format"]
         D4["Write Npix=N/&lt;date&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
         D1 --> D2 --> D3 --> D4
-        D3 -->|"unknown format"| FLAG["Set format-change flag<br/>+ email"]
+        D3 -->|"unknown format"| FLAG["Stop the run, write nothing,<br/>set format-change flag + email"]
     end
 
     LAND --> D1
@@ -51,7 +51,7 @@ flowchart TD
 
     WORK --> W0
     FLAG -.-> W0
-    HUMAN["Human: add the new format,<br/>re-ingest affected nights,<br/>clear the flag, re-run weekly"]
+    HUMAN["Human: add the new format;<br/>if the catalog schema changes,<br/>re-import everything;<br/>clear the flag, re-run weekly"]
     FLAG --> HUMAN
     SKIP --> HUMAN
     HUMAN -.-> W0
@@ -116,13 +116,32 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Format 1101 is supported.** The new catalog uses the 1101 columns. Rows
   from 1000/1100 alerts get nulls for the four new `diaSource` fields
   (`exposureTime`, `reliabilityVersion`, `trailAlgorithm`, `trail_flag`).
-- **Unknown alert formats:** the daily pipeline keeps running and writes those
-  alerts as well as it can. It also sets a format-change flag and sends an email.
-  While the flag is set, the Saturday re-import skips aggregation and sends an email.
-  A person then adds the format, re-ingests the affected nights, clears the flag
-  and re-runs the weekly job. Nightly files are only merged by the weekly job,
-  so re-ingesting a night means deleting that night's files and taking its
-  batches off the ingested list. We expect this once or twice over the next few months.
+- **Unknown alert formats stop the pipeline.** Users read the working catalog
+  directly, so best-effort rows would reach them the same day. When a daily run
+  finds an alert format it doesn't know, it writes nothing, sets the
+  format-change flag and sends an email. While the flag is set, daily runs stop
+  and the Saturday re-import skips (and emails). Nothing bad is written, so the
+  unknown chunks simply stay off the ingested list. A person then:
+  1. adds the format;
+  2. if the new format changes the catalog's columns, re-imports the whole
+     catalog (or upgrades every file) to the new schema, since every file must
+     share one schema;
+  3. clears the flag. The next daily run ingests the waiting chunks normally.
+
+  For now the format is detected from the mocked `schemaId` and the cast
+  report; once the converter keeps the real `schemaId`, it can stop at the
+  first alert with a new one. We expect this at most once or twice over the next
+  few months, so it is meant to be an all-hands event rather than handled
+  automatically. (Decided 2026-10-29; this replaces "keep ingesting best
+  effort".)
+- **One schema for every file.** `write_partitions` checks each night's
+  partitions against the catalog's `_common_metadata` schema, nested fields
+  included, and fails before writing anything if a column or type differs.
+  Only nullability and field order are cast to match. This also catches
+  schema drift that isn't a new alert format, e.g. from a library upgrade.
+  `update_metadata` writes `partition_info.csv` and `hats.properties` before
+  combining the footers into `_metadata`, so if that ever fails, the pixels
+  and row counts are already right.
 
 ### Operations
 
@@ -150,8 +169,8 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 
 - **Pixel growth is acceptable for now.** The daily import never splits existing
   pixels. It only adds new pixels for alerts outside the current coverage.
-  Pixels keep growing until the weekly re-import, and longer if a
-  format-change flag makes it skip.
+  Pixels keep growing until the weekly re-import. While a format-change flag
+  is set, the daily runs stop too, so nothing grows while the merge waits.
 - **Stale margin and index are acceptable for now.** They are rebuilt only by
   the weekly re-import. Users reading the working catalog between re-imports
   can miss crossmatches with new alerts near pixel boundaries, and
@@ -165,7 +184,6 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   - A reader that opened the catalog before files were deleted, by a
     re-ingest or the orphan cleanup, can hit `FileNotFoundError`. Reopening
     the catalog fixes it.
-  - While the format-change flag is set, users see the best-effort rows.
 
 ## Open questions
 
@@ -195,9 +213,9 @@ and nothing runs on a schedule until PR 9.
 | 2 | **Reader** | `reader.py` (the notebook's `AlertReader`), small test fixtures cut from the dump, tests | small |
 | 3 | **Schema** | `schema.py`: 1101 target columns, casting, `schemaId` mock, unknown-format detection | small |
 | 4 | **State + notify** | `state.py` (ingested log, format-change flag, lock), `notify.py` (email) | small |
-| 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata; `config.py`, `pipeline.py` | medium |
+| 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
 | 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` | small |
-| 7 | **Daily run + replay** | `daily/run.py`, `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
+| 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
 | 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |
