@@ -13,6 +13,7 @@ parquet file per run in each ``Npix=<pixel>/`` directory it touched.
 """
 
 import logging
+import re
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,12 @@ from lsdb.io.to_hats import (
 from lsdb.io.to_hats import write_partitions as lsdb_write_partitions
 
 logger = logging.getLogger(__name__)
+
+RUN_FILE_NAME = re.compile(r"\d{8}T\d{6}Z\.parquet")
+"""Name of the files a daily run writes: its run ID (see ``state.new_run_id``) plus ``.parquet``.
+
+The IDs are UTC timestamps of fixed width, so sorting the names sorts the runs by start time.
+"""
 
 
 def write_partitions(catalog, *, base_catalog_dir, histogram_order, parquet_name, **kwargs):
@@ -216,10 +223,16 @@ def find_orphan_files(catalog_dir, known_file_names) -> list[Path]:
 def remove_orphan_files(catalog_dir, known_file_names) -> list[Path]:
     """Delete leaf parquet files that no known run wrote.
 
-    See :func:`find_orphan_files`. Call this while holding the pipeline lock,
-    before ingesting, so no running job is still writing the files. The skymaps
-    and metadata still count the deleted files until the next
+    See :func:`find_orphan_files`, which lists the same files without
+    deleting them. Call this while holding the pipeline lock, before
+    ingesting, so no running job is still writing the files. The skymaps and
+    metadata still count the deleted files until the next
     :func:`update_skymaps` and :func:`update_metadata`.
+
+    Runs never overlap, and each one cleans up before it writes, so real
+    orphans always come from one crashed run, newer than every run in the
+    log. Anything else more likely means ``known_file_names`` is incomplete,
+    e.g. a truncated log or a missing baseline name, so nothing is deleted.
 
     Parameters
     ----------
@@ -236,15 +249,45 @@ def remove_orphan_files(catalog_dir, known_file_names) -> list[Path]:
     Raises
     ------
     ValueError
-        If ``known_file_names`` is empty. Every file would count as orphaned
-        then, which more likely means the log is missing than that the whole
-        catalog is.
+        If ``known_file_names`` is empty, or the orphans don't look like the
+        files of one crashed run: their names aren't run IDs, they come from
+        more than one run, or their run is older than the newest known run.
+        Nothing is deleted then.
     """
     known = set(known_file_names)
     if not known:
         raise ValueError("known_file_names is empty, so every file would be deleted")
     orphans = find_orphan_files(catalog_dir, known)
+    _check_orphans_safe_to_delete(orphans, known)
     for path in orphans:
         logger.warning("Removing orphaned file %s", path)
         path.unlink()
     return orphans
+
+
+def _check_orphans_safe_to_delete(orphans: list[Path], known: set[str]):
+    """Raise unless ``orphans`` look like the leftovers of one crashed run.
+
+    That means all of these hold (see :func:`remove_orphan_files` for why):
+
+    1. Every name is a run ID (:data:`RUN_FILE_NAME`), not e.g. a baseline file.
+    2. They all share one name, so they come from one run.
+    3. That run is newer than every run ID in ``known``.
+
+    Raises
+    ------
+    ValueError
+        If any of the checks fails, naming the files.
+    """
+    names = sorted({path.name for path in orphans})
+    if not names:
+        return
+    hint = "Check that known_file_names lists every run in the log and the baseline."
+    not_runs = [name for name in names if not RUN_FILE_NAME.fullmatch(name)]
+    if not_runs:
+        raise ValueError(f"orphaned files with names no daily run writes: {not_runs}. {hint}")
+    if len(names) > 1:
+        raise ValueError(f"orphaned files from {len(names)} runs, but a crash leaves one: {names}. {hint}")
+    latest = max((name for name in known if RUN_FILE_NAME.fullmatch(name)), default=None)
+    if latest is not None and names[0] < latest:
+        raise ValueError(f"orphaned run {names[0]} is older than the newest known run {latest}. {hint}")

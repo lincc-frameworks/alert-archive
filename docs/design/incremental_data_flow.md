@@ -141,7 +141,10 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Orphaned files:** a run that crashes after writing its files but before
   adding itself to `ingested.jsonl` leaves files that no run owns. Its chunks
   get ingested again next time, so the daily run deletes leaf files whose
-  names aren't in the log (or the baseline) before it ingests.
+  names aren't in the log (or the baseline) before it ingests. True orphans
+  always come from one crashed run, newer than every logged run, so the
+  cleanup refuses to delete anything else. A truncated log or a missing
+  baseline name then stops the run instead of deleting the catalog.
 
 ### Accepted trade-offs (for now)
 
