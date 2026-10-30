@@ -137,7 +137,8 @@ def to_nested(table: pa.Table) -> pa.Table:
 
     A struct becomes a struct of length-1 lists, so each alert has one nested
     row. A list of structs becomes a struct of lists of the same lengths. Null
-    lists become empty lists, which matches the frozen catalog.
+    structs and null lists both become empty lists (no nested rows), as
+    nested-pandas expects for a missing value.
 
     Parameters
     ----------
@@ -165,10 +166,11 @@ def _struct_to_nested(array: pa.StructArray) -> pa.StructArray:
     """Turn a struct column into a struct of length-1 lists.
 
     Each row's struct becomes one nested row, e.g. ``{a: 1, b: 2}`` becomes
-    ``{a: [1], b: [2]}``.
+    ``{a: [1], b: [2]}``. A null struct becomes empty lists, ``{a: [], b: []}``,
+    rather than one nested row of nulls.
     """
-    offsets = pa.array(range(len(array) + 1), type=pa.int32())
-    return _struct_of_lists(offsets, array)
+    valid = array.is_valid()
+    return _struct_of_lists(_offsets_from_lengths(pc.cast(valid, pa.int32())), array.filter(valid))
 
 
 def _list_of_struct_to_nested(array: pa.ListArray) -> pa.StructArray:
@@ -181,8 +183,12 @@ def _list_of_struct_to_nested(array: pa.ListArray) -> pa.StructArray:
     # flatten() accounts for slicing and skips anything behind null lists,
     # so the offsets are rebuilt from the list lengths rather than reused.
     lengths = pc.fill_null(pc.list_value_length(array), 0)
-    offsets = pa.concat_arrays([pa.array([0], type=pa.int32()), pc.cumulative_sum(lengths).cast(pa.int32())])
-    return _struct_of_lists(offsets, array.flatten())
+    return _struct_of_lists(_offsets_from_lengths(lengths), array.flatten())
+
+
+def _offsets_from_lengths(lengths: pa.Array) -> pa.Array:
+    """int32 list offsets for rows of the given lengths: ``[2, 0, 1]`` -> ``[0, 2, 2, 3]``."""
+    return pa.concat_arrays([pa.array([0], type=pa.int32()), pc.cumulative_sum(lengths).cast(pa.int32())])
 
 
 def _struct_of_lists(offsets: pa.Array, structs: pa.StructArray) -> pa.StructArray:

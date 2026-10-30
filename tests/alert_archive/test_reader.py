@@ -38,8 +38,9 @@ def test_adds_coordinates_first(alert_sample_pq_path, raw_alerts):
         assert table[col_name].to_pylist() == expected.to_pylist()
 
 
-def test_struct_columns_become_nested(alert_sample_pq_path):
-    """nested-pandas sees every struct column as nested, with one row per alert for scalars.
+def test_struct_columns_become_nested(alert_sample_pq_path, raw_alerts):
+    """nested-pandas sees every struct column as nested, with one row per alert for scalars,
+    or none where the struct is null (e.g. diaObject on solar-system alerts).
 
     Motivation for this test: we see no failure at import-time if struct-to-nested
     conversion goes wrong, but users would hit confusing errors/miss out on nested
@@ -47,7 +48,12 @@ def test_struct_columns_become_nested(alert_sample_pq_path):
     nf = npd.from_pyarrow(read_all(alert_sample_pq_path))
     assert sorted(nf.nested_columns) == sorted(NESTED_COLUMNS)
     assert all(len(nf.iloc[i]["diaSource"]) == 1 for i in range(len(nf)))
-    assert all(len(nf.iloc[i]["diaObject"]) == 1 for i in range(len(nf)))
+    expected = [0 if obj is None else 1 for obj in raw_alerts["diaObject"].to_pylist()]
+    assert [len(nf.iloc[i]["diaObject"]) for i in range(len(nf))] == expected
+
+    # Guard against a fixture that would make this test pass vacuously:
+    # it must contain at least one null diaObject and one present one.
+    assert 0 in expected and 1 in expected
 
 
 def test_history_is_preserved(alert_sample_pq_path, raw_alerts):
