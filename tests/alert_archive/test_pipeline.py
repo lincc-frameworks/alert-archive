@@ -1,5 +1,6 @@
 import logging
 
+import pytest
 from alert_archive.config import DaskConfig, PathConfig, get_default_config
 from alert_archive.pipeline import Pipeline
 from dask.distributed import Client
@@ -39,3 +40,15 @@ def test_execute_makes_tmp_dir_under_configured_dir(tmp_path):
 def test_default_config():
     """A pipeline without a config gets the defaults."""
     assert RecordingPipeline().config == get_default_config()
+
+
+def test_base_run_is_abstract():
+    """A subclass that defers to the base ``run`` gets a clear error."""
+
+    class Incomplete(Pipeline):
+        def run(self, client, tmp_dir, *args, **kwargs):
+            """Defer to the base class."""
+            return super().run(client, tmp_dir, *args, **kwargs)
+
+    with pytest.raises(NotImplementedError, match="Subclasses must implement"):
+        Incomplete().run(None, None)

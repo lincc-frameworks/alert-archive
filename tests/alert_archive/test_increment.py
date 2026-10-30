@@ -175,6 +175,41 @@ def test_write_partitions_returns_rows_per_pixel(base_dir):
         assert pq.read_metadata(path).num_row_groups == 1
 
 
+def test_write_partitions_skips_empty_partitions(base_dir):
+    """Pixels with no new alerts get no file and aren't in the result."""
+    catalog = make_catalog(1000, 100, (0, 90), seed=1)
+    nonempty = catalog.query("id < 1010")
+    rows_written = write_partitions(nonempty, base_catalog_dir=base_dir, parquet_name="run1.parquet")
+
+    assert sum(rows_written.values()) == 10
+    assert len(rows_written) < len(catalog.get_healpix_pixels())
+    written = {
+        pixel for pixel, files in leaf_files(base_dir).items() if any(f.name == "run1.parquet" for f in files)
+    }
+    assert written == set(rows_written)
+
+
+def test_write_partitions_cleans_up_after_crash(base_dir, monkeypatch):
+    """If writing fails partway, the files the run already wrote are deleted again."""
+    real_write_table = pq.write_table
+    calls = []
+
+    def fail_after_first(*args, **kwargs):
+        calls.append(1)
+        if len(calls) > 1:
+            raise OSError("disk full")
+        real_write_table(*args, **kwargs)
+
+    monkeypatch.setattr(pq, "write_table", fail_after_first)
+    # lsdb wraps errors from a partition in a RuntimeError.
+    with pytest.raises(RuntimeError, match="disk full"):
+        write_partitions(
+            make_catalog(1000, 100, (0, 90), seed=1), base_catalog_dir=base_dir, parquet_name="run1.parquet"
+        )
+    assert len(calls) > 1
+    assert not list(base_dir.glob("dataset/**/run1.parquet"))
+
+
 def test_write_partitions_refuses_schema_change(base_dir):
     """New alerts with an extra column fail before any file is written."""
     catalog = make_catalog(1000, 100, (45, 180), seed=1)
