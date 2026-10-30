@@ -30,7 +30,7 @@ flowchart TD
         D1["Find unprocessed batches<br/>(compare with ingested-file list)"]
         D2["AlertReader transform<br/>add ra/dec, struct → nested, drop cutouts"]
         D3["Cast to catalog columns (1101)<br/>best effort for unknown formats"]
-        D4["Write Npix=N/&lt;date&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
+        D4["Write Npix=N/&lt;run_id&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
         D1 --> D2 --> D3 --> D4
         D3 -->|"unknown format"| FLAG["Set format-change flag<br/>+ email"]
     end
@@ -91,12 +91,21 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   needs for promote and rollback.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
-  - `ingested.jsonl`: one line per daily run, with the run ID, the parquet
-    file name it wrote, its input chunks, its row count and its `schemaId`
-    counts. Nightly files are named by run ID, not date, so a manual re-run
-    can't overwrite an earlier run's files.
+  - `ingested.jsonl`: one line per daily run, with the run ID, its start
+    time, its input chunks, its row count and its `schemaId` counts. It also
+    lists the chunks the run skipped, with their errors, so the summary email
+    can say how long a chunk has been failing. Only the input chunks count as
+    ingested. Each run's files are named `<run ID>.parquet` (not by date), so
+    the log doesn't store file names, and a manual re-run can't overwrite an
+    earlier run's files.
+    Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
+    takes it off the log, but leaves the skymaps and metadata stale until the
+    next weekly re-import rebuilds them. That's accepted because re-ingesting
+    only happens while the format-change flag is set, when nothing is published.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
+    If a job dies without removing it, nothing breaks it automatically: the
+    next job fails loudly until a person checks and deletes it.
 
 ### Input and alert formats
 
@@ -192,8 +201,13 @@ contains it:
   - It assumes new alerts always arrive in new raw subdirs and existing subdirs
     never change. Subdirs are alertId prefixes, not nights, so this should be checked.
   - It also strips `ssSource` and `mpc_orbits`, not just the cutouts.
-- **Email delivery:** `mail` exists on the interactive nodes. Does it actually
-  deliver when run from the nightly job?
+- **Email delivery (checked 2026-10-27):** `mail` delivers from both an
+  interactive node and a milano compute node, run from a Slurm job submitted
+  with cron's minimal environment. Mail to an external (CMU) address arrived
+  from both. The compute nodes use Sendmail rather than postfix as
+  `/usr/sbin/sendmail`, but both relay through `sdfmail.sdf.slac.stanford.edu`.
+  `mail` exiting cleanly only means it accepted the message, so a broken relay
+  wouldn't show up as an error; it would show up as missing emails.
 
 ## Implementation plan
 
