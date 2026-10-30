@@ -150,7 +150,7 @@ class BaselinePipeline(Pipeline):
                 output_path=paths.working_dir.parent,
                 output_artifact_name=paths.working_dir.name,
                 input_file_list=[str(c) for c in chunks],
-                file_reader=AlertReader(conform=True),
+                file_reader=AlertReader(),
                 ra_column=import_config.ra_column,
                 dec_column=import_config.dec_column,
                 byte_pixel_threshold=import_config.byte_pixel_threshold,

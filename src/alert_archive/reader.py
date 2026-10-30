@@ -2,9 +2,11 @@
 
 The input files hold one alert per row, with ``diaSource`` and ``diaObject``
 as struct columns and ``prvDiaSources`` / ``prvDiaForcedSources`` as lists of
-structs. :class:`AlertReader` turns each table into the layout the catalog
-uses:
+structs. :class:`AlertReader` turns each table into the catalog's columns
+and layout:
 
+- the catalog's columns, from :func:`alert_archive.schema.conform_alerts`;
+  any format change stops the read with :class:`FormatChangeError`;
 - top-level ``ra`` / ``dec`` columns, copied from ``diaSource``;
 - every struct and list-of-struct column as a struct of lists, which
   nested-pandas reads as a nested column;
@@ -13,7 +15,10 @@ uses:
 
 import pyarrow as pa
 import pyarrow.compute as pc
+from hats.io import file_io
 from hats_import.catalog.file_readers import ParquetPyarrowReader
+
+from .schema import ConformReport, conform_alerts
 
 COORDINATE_COLUMNS = ("ra", "dec")
 """Top-level coordinate columns added by the reader."""
@@ -23,6 +28,18 @@ COORDINATE_SOURCE = "diaSource"
 
 CUTOUT_PREFIX = "cutout"
 """Columns whose names start with this prefix are dropped."""
+
+
+class FormatChangeError(ValueError):
+    """Raised when an input chunk's alerts aren't in a format the catalog fully supports."""
+
+    def __init__(self, input_file, report: ConformReport):
+        self.input_file = input_file
+        self.report = report
+        super().__init__(
+            f"{input_file}: alerts don't fit the catalog's format. Format IDs: {report.schema_ids}. "
+            f"Dropped: {report.dropped}. Cast: {report.cast}. Set to null: {list(report.nulled)}."
+        )
 
 
 class AlertReader(ParquetPyarrowReader):
@@ -38,6 +55,10 @@ class AlertReader(ParquetPyarrowReader):
         returned. If given, it must include ``ra`` and ``dec``: hats-import
         places each alert on the sky by them, and without them the import
         fails partway through, after reading every input file once.
+        Every read returns the catalog's columns: converting needs the whole
+        alert, so a subset is read in full and selected afterwards. The one
+        exception is reading only ``ra`` / ``dec``, as hats-import's mapping
+        pass does, which reads just those two fields.
 
     Raises
     ------
@@ -78,10 +99,25 @@ class AlertReader(ParquetPyarrowReader):
         ------
         pyarrow.Table
             One table per input batch.
+
+        Raises
+        ------
+        FormatChangeError
+            If a batch's alerts aren't in a format the catalog fully supports
+            (see :attr:`~alert_archive.schema.ConformReport.is_format_change`).
         """
         columns = read_columns or self.column_names
-        file_columns = _input_columns(columns) if columns else None
+        coordinates_only = bool(columns) and set(columns) <= set(COORDINATE_COLUMNS)
+        if coordinates_only:
+            file_columns = _input_columns(columns)
+        else:
+            # Converting to the catalog's columns needs the whole alert, so read everything.
+            file_columns = file_io.read_parquet_file(input_file, **self.kwargs).schema_arrow.names
         for table in super().read(input_file, read_columns=file_columns):
+            if not coordinates_only:
+                table, report = conform_alerts(table)
+                if report.is_format_change:
+                    raise FormatChangeError(input_file, report)
             table = transform_alerts(table)
             yield table.select(columns) if columns else table
 
