@@ -29,6 +29,10 @@ COORDINATE_SOURCE = "diaSource"
 CUTOUT_PREFIX = "cutout"
 """Columns whose names start with this prefix are dropped."""
 
+DEFAULT_CHUNKSIZE = 5_000
+"""Rows per batch. Alerts in busy fields carry long histories: one 50k-row
+dump chunk takes about 31 GB to read whole, but 8 GB in batches of this size."""
+
 
 class FormatChangeError(ValueError):
     """Raised when an input chunk's alerts aren't in a format the catalog fully supports."""
@@ -50,6 +54,9 @@ class AlertReader(ParquetPyarrowReader):
 
     Parameters
     ----------
+    chunksize : int
+        Rows per batch (see :data:`DEFAULT_CHUNKSIZE`). Each batch is
+        converted on its own, so the result doesn't depend on it.
     column_names : list[str] or None
         Output columns to return. If None (the default), all columns are
         returned. If given, it must include ``ra`` and ``dec``: hats-import
@@ -66,7 +73,7 @@ class AlertReader(ParquetPyarrowReader):
         If ``column_names`` is given without ``ra`` and ``dec``.
     """
 
-    def __init__(self, chunksize=500_000, column_names=None, iterate_by_row_groups=False, **kwargs):
+    def __init__(self, chunksize=DEFAULT_CHUNKSIZE, column_names=None, iterate_by_row_groups=False, **kwargs):
         if column_names is not None:
             missing = [c for c in COORDINATE_COLUMNS if c not in column_names]
             if missing:
