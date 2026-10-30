@@ -30,7 +30,7 @@ flowchart TD
         D1["Find unprocessed batches<br/>(compare with ingested-file list)"]
         D2["AlertReader transform<br/>add ra/dec, struct → nested, drop cutouts"]
         D3["Cast to catalog columns (1101)<br/>stop before writing on unknown format"]
-        D4["Write Npix=N/&lt;date&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
+        D4["Write Npix=N/&lt;run_id&gt;.parquet,<br/>update skymaps + metadata,<br/>add batches to ingested list<br/>(ppdb_hats increment.py)"]
         D1 --> D2 --> D3 --> D4
         D3 -->|"unknown format"| FLAG["Stop the run, write nothing,<br/>set format-change flag + email"]
     end
@@ -92,12 +92,21 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   needs for promote and rollback.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
-  - `ingested.jsonl`: one line per daily run, with the run ID, the parquet
-    file name it wrote, its input chunks, its row count and its `schemaId`
-    counts. Nightly files are named by run ID, not date, so a manual re-run
-    can't overwrite an earlier run's files.
+  - `ingested.jsonl`: one line per daily run, with the run ID, its start
+    time, its input chunks, its row count and its `schemaId` counts. It also
+    lists the chunks the run skipped, with their errors, so the summary email
+    can say how long a chunk has been failing. Only the input chunks count as
+    ingested. Each run's files are named `<run ID>.parquet` (not by date), so
+    the log doesn't store file names, and a manual re-run can't overwrite an
+    earlier run's files.
+    Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
+    takes it off the log, e.g. to redo runs that wrote bad data after a bug
+    fix. The skymaps and metadata still count those files until the next
+    daily run rebuilds them from disk.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
+    If a job dies without removing it, nothing breaks it automatically: the
+    next job fails loudly until a person checks and deletes it.
 
 ### Input and alert formats
 
@@ -178,18 +187,19 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 
 ### Error handling
 
-Failures are loud, but a problem with some of the data doesn't stop the rest
-from being ingested. Each failure is handled at the smallest level that
-contains it:
+Failures are loud. A problem with some of the data doesn't stop the rest
+from being ingested, except an unknown alert format, which stops everything
+(see "Unknown alert formats stop the pipeline"). Each failure is handled at
+the smallest level that contains it:
 
 | Level | Example | What happens | How it's recovered |
 |---|---|---|---|
-| **Field** | A new alert format changes a field's type, or adds or removes fields | All alerts are kept. Unknown fields are dropped, missing ones are filled with nulls, and a field that can't be converted is set to null for every alert in that chunk, not just the ones with bad values. Sets the format-change flag. | After the code is fixed, re-ingest the flagged runs: delete the catalog files those runs wrote (`Npix=*/<run_id>.parquet`, listed in `ingested.jsonl`), drop their log lines, re-run. Their input chunks are still on disk. |
+| **Format** | A new alert format changes a field's type, or adds or removes fields | The run writes nothing, sets the format-change flag and sends an email. Daily runs and the weekly re-import stop while the flag is set. | Add the format; if the catalog's columns change, re-import the whole catalog; clear the flag. The waiting chunks were never logged, so the next run ingests them. |
 | **Chunk** | A corrupt or truncated parquet file | That chunk is skipped and its error recorded; every other chunk is ingested. | Automatic: a skipped chunk never enters `ingested.jsonl`, so the next nightly run finds it again. If it needs a code fix, the first run after the fix picks it up. |
 | **Run** | Catalog not writable, disk full, lock held | The run stops with an error rather than risk a half-written catalog. | Fix the cause and re-run. Safe because metadata is recomputed from disk. |
 
 - **One summary email per run**, not one per error. It lists format changes
-  (with the fields dropped or set to null), skipped chunks with their errors,
+  (with the fields that differ), skipped chunks with their errors,
   and chunks that have kept failing ("failing since <date>"), so a chunk that
   fails every night doesn't look like news each time.
 - **Schema checks happen at development time.** `avro_schema_to_arrow` raises
@@ -244,8 +254,13 @@ contains it:
   - It assumes new alerts always arrive in new raw subdirs and existing subdirs
     never change. Subdirs are alertId prefixes, not nights, so this should be checked.
   - It also strips `ssSource` and `mpc_orbits`, not just the cutouts.
-- **Email delivery:** `mail` exists on the interactive nodes. Does it actually
-  deliver when run from the nightly job?
+- **Email delivery (checked 2026-10-27):** `mail` delivers from both an
+  interactive node and a milano compute node, run from a Slurm job submitted
+  with cron's minimal environment. Mail to an external (CMU) address arrived
+  from both. The compute nodes use Sendmail rather than postfix as
+  `/usr/sbin/sendmail`, but both relay through `sdfmail.sdf.slac.stanford.edu`.
+  `mail` exiting cleanly only means it accepted the message, so a broken relay
+  wouldn't show up as an error; it would show up as missing emails.
 
 ## Implementation plan
 
