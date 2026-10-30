@@ -51,10 +51,15 @@ class PathConfig:
         local directory for worker spill. Defaults to ``$LSCRATCH`` (node-local
         scratch on S3DF batch nodes) when it's set, else the system default
         (usually ``/tmp``, which can be small).
+    dump_dir : pathlib.Path
+        Neven Caplar's parquet dump of the alert archive, outside the root.
+        The baseline is built from its first chunks, and the rest are
+        replayed through the daily pipeline.
     """
 
     root: Path = Path("/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2")
     tmp_dir: Path | None = field(default_factory=lambda: os.environ.get("LSCRATCH") or None)
+    dump_dir: Path = Path("/sdf/data/rubin/user/ncaplar/alert-parquet")
 
     @property
     def landing_dir(self) -> Path:
@@ -77,6 +82,8 @@ class PathConfig:
             self.root = Path(self.root)
         if isinstance(self.tmp_dir, str):
             self.tmp_dir = Path(self.tmp_dir)
+        if isinstance(self.dump_dir, str):
+            self.dump_dir = Path(self.dump_dir)
 
 
 @dataclass
