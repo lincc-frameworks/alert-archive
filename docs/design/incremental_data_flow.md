@@ -107,15 +107,25 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   per-alert `schemaId` column read from the Avro header (bytes 1–4).
 - **`schemaId` is mocked for now.** Neven's dump has no format ID and uses
   one uniform column set: no 1101 fields, and every field nullable. So the
-  mock infers it from the columns present: `1101` if any of the four 1101
-  `diaSource` fields exist, otherwise `1100`. 1000 and 1100 differ only in
+  mock infers it from the columns: the newest known format whose columns
+  match exactly, or unknown if none do. 1000 and 1100 differ only in
   nullability, so the dump can't tell them apart. It doesn't matter here,
-  because both cast to the catalog the same way. The real value replaces the
+  because both cast to the catalog the same way. The catalog stores the
+  inferred value, so alerts from the dump are all labelled `1100`, including
+  any that were really `1000`. The real value replaces the
   mock once the converter rewrite lands. The 170xxx raw Avro files are still on
   disk, so the real IDs could be recovered later if needed.
 - **Format 1101 is supported.** The new catalog uses the 1101 columns. Rows
   from 1000/1100 alerts get nulls for the four new `diaSource` fields
   (`exposureTime`, `reliabilityVersion`, `trailAlgorithm`, `trail_flag`).
+  `prvDiaSources` reuses the `diaSource` definition, so it gets the same four fields.
+- **`ssSource` and `mpc_orbits` are left out for now (may revisit).** All three
+  alert formats include them for solar-system alerts (about 21% of alerts),
+  but Neven's dump and the frozen catalog drop them. These values exist only
+  in the raw Avro alerts; the converter strips them before writing parquet,
+  so nothing downstream can recover them. Revisit this when we port the
+  converter, where we can choose to keep them. Adding them later changes
+  the catalog's columns, which needs a weekly re-import.
 - **Unknown alert formats stop the pipeline.** Users read the working catalog
   directly, so best-effort rows would reach them the same day. When a daily run
   finds an alert format it doesn't know, it writes nothing, sets the
@@ -165,6 +175,34 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   always come from one crashed run, newer than every logged run, so the
   cleanup refuses to delete anything else. A truncated log or a missing
   baseline name then stops the run instead of deleting the catalog.
+
+### Error handling
+
+Failures are loud, but a problem with some of the data doesn't stop the rest
+from being ingested. Each failure is handled at the smallest level that
+contains it:
+
+| Level | Example | What happens | How it's recovered |
+|---|---|---|---|
+| **Field** | A new alert format changes a field's type, or adds or removes fields | All alerts are kept. Unknown fields are dropped, missing ones are filled with nulls, and a field that can't be converted is set to null for every alert in that chunk, not just the ones with bad values. Sets the format-change flag. | After the code is fixed, re-ingest the flagged runs: delete the catalog files those runs wrote (`Npix=*/<run_id>.parquet`, listed in `ingested.jsonl`), drop their log lines, re-run. Their input chunks are still on disk. |
+| **Chunk** | A corrupt or truncated parquet file | That chunk is skipped and its error recorded; every other chunk is ingested. | Automatic: a skipped chunk never enters `ingested.jsonl`, so the next nightly run finds it again. If it needs a code fix, the first run after the fix picks it up. |
+| **Run** | Catalog not writable, disk full, lock held | The run stops with an error rather than risk a half-written catalog. | Fix the cause and re-run. Safe because metadata is recomputed from disk. |
+
+- **One summary email per run**, not one per error. It lists format changes
+  (with the fields dropped or set to null), skipped chunks with their errors,
+  and chunks that have kept failing ("failing since <date>"), so a chunk that
+  fails every night doesn't look like news each time.
+- **Schema checks happen at development time.** `avro_schema_to_arrow` raises
+  on any Avro feature it doesn't support. It only runs on our own copies of the
+  known schema files, so that error shows up in tests, never in a nightly run.
+- **Where each part lives:** `schema.py` doesn't catch errors or send email.
+  It returns the converted table plus a report of what it dropped, filled
+  or set to null, and which `schemaId`s it saw. The daily run decides what to
+  do per chunk, and `notify.py` sends the email.
+- **Not handled yet: individual bad alerts.** An alert without usable `ra`/`dec`
+  can't be placed on the sky. The dump marks both as non-null, so we don't
+  expect this. If it happens, those rows could go to
+  `state/rejected/<run_id>.parquet` with a reason column.
 
 ### Accepted trade-offs (for now)
 
