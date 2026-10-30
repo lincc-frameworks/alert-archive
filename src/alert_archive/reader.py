@@ -109,7 +109,7 @@ class AlertReader(ParquetPyarrowReader):
         columns = read_columns or self.column_names
         coordinates_only = bool(columns) and set(columns) <= set(COORDINATE_COLUMNS)
         if coordinates_only:
-            file_columns = _input_columns(columns)
+            file_columns = [f"{COORDINATE_SOURCE}.{c}" for c in COORDINATE_COLUMNS]
         else:
             # Converting to the catalog's columns needs the whole alert, so read everything.
             file_columns = file_io.read_parquet_file(input_file, **self.kwargs).schema_arrow.names
@@ -120,14 +120,6 @@ class AlertReader(ParquetPyarrowReader):
                     raise FormatChangeError(input_file, report)
             table = transform_alerts(table)
             yield table.select(columns) if columns else table
-
-
-def _input_columns(columns):
-    """Map requested output columns to the input columns needed to build them."""
-    file_columns = [c for c in columns if c not in COORDINATE_COLUMNS]
-    if len(file_columns) < len(columns) and COORDINATE_SOURCE not in file_columns:
-        file_columns += [f"{COORDINATE_SOURCE}.{c}" for c in COORDINATE_COLUMNS]
-    return file_columns
 
 
 def transform_alerts(table: pa.Table) -> pa.Table:
