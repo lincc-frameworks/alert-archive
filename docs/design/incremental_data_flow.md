@@ -92,11 +92,12 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
   - `ingested.jsonl`: one line per daily run, with the run ID, its start
-    time, the parquet file name it wrote, its input chunks, its row count and
-    its `schemaId` counts. It also lists the chunks the run skipped, with their
-    errors, so the summary email can say how long a chunk has been failing.
-    Only the input chunks count as ingested. Nightly files are named by run ID,
-    not date, so a manual re-run can't overwrite an earlier run's files.
+    time, its input chunks, its row count and its `schemaId` counts. It also
+    lists the chunks the run skipped, with their errors, so the summary email
+    can say how long a chunk has been failing. Only the input chunks count as
+    ingested. Each run's files are named `<run ID>.parquet` (not by date), so
+    the log doesn't store file names, and a manual re-run can't overwrite an
+    earlier run's files.
     Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
     takes it off the log, but leaves the skymaps and metadata stale until the
     next weekly re-import rebuilds them. That's accepted because re-ingesting

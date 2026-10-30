@@ -47,8 +47,6 @@ class RunRecord:
     """Unique ID of the run. Also the name of the parquet files it wrote."""
     started: str
     """When the run started, as an ISO 8601 UTC timestamp."""
-    file_name: str | None = None
-    """Name of the parquet file written in each pixel, or None if nothing was written."""
     chunks: list[str] = field(default_factory=list)
     """Input chunks ingested by this run."""
     num_rows: int = 0
@@ -57,6 +55,11 @@ class RunRecord:
     """Number of alerts per format ID. None means the format is unknown."""
     skipped: dict[str, str] = field(default_factory=dict)
     """Input chunks that failed, with their error. They aren't ingested, so the next run retries them."""
+
+    @property
+    def file_name(self) -> str | None:
+        """Name of the parquet file this run wrote in each pixel, or None if it wrote nothing."""
+        return f"{self.run_id}.parquet" if self.num_rows else None
 
     def __post_init__(self):
         # Counts often come from pyarrow or pandas as numpy ints, which json can't write.

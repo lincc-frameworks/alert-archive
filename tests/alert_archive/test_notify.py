@@ -46,7 +46,6 @@ def test_daily_summary_ok():
     record = RunRecord(
         run_id="r1",
         started="2026-10-27T03:00:00+00:00",
-        file_name="r1.parquet",
         chunks=["a", "b"],
         num_rows=100,
         schema_id_counts={1100: 90, 1101: 10},

@@ -10,10 +10,22 @@ def make_run(run_id, chunks=(), skipped=None, **kwargs):
     return RunRecord(run_id=run_id, started=run_id, chunks=list(chunks), skipped=skipped or {}, **kwargs)
 
 
+def make_written_run(run_id, chunks=()):
+    """A run that wrote files, named ``<run_id>.parquet``."""
+    return make_run(run_id, chunks, num_rows=1)
+
+
 def test_new_run_id_is_utc_timestamp():
     """Run IDs are the start time in UTC, to the second."""
     now = datetime(2026, 10, 27, 3, 15, 0, tzinfo=UTC)
     assert new_run_id(now) == "20261027T031500Z"
+
+
+def test_file_name_derived_from_run_id():
+    """A run's files are named by its run ID; a run that wrote nothing has no file name."""
+    assert make_run("20261027T031500Z", num_rows=5).file_name == "20261027T031500Z.parquet"
+    assert make_run("20261027T031500Z").file_name is None
+    assert "file_name" not in make_run("r1", num_rows=5).to_json()
 
 
 def test_run_record_round_trips_unknown_schema_id():
@@ -95,8 +107,8 @@ def test_reingest_runs_deletes_files_and_log_lines(tmp_path):
     catalog = tmp_path / "catalog"
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10), (2, 50)])
     r2_files = write_catalog_files(catalog, "r2.parquet", [(1, 10)])
-    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
-    state.append_run(make_run("r2", ["b"], file_name="r2.parquet"))
+    state.append_run(make_written_run("r1", ["a"]))
+    state.append_run(make_written_run("r2", ["b"]))
     state.append_run(make_run("r3", skipped={"c": "corrupt"}))
 
     removed = state.reingest_runs(catalog, ["r1", "r3"])
@@ -113,8 +125,8 @@ def test_reingest_refuses_merged_runs(tmp_path):
     state = PipelineState(tmp_path / "state")
     catalog = tmp_path / "catalog"
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
-    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
-    state.append_run(make_run("r2", ["b"], file_name="r2.parquet"))
+    state.append_run(make_written_run("r1", ["a"]))
+    state.append_run(make_written_run("r2", ["b"]))
 
     with pytest.raises(FileNotFoundError, match="r2"):
         state.reingest_runs(catalog, ["r1", "r2"])
@@ -127,7 +139,7 @@ def test_reingest_missing_files_ok(tmp_path):
     """With missing_files_ok, a run whose files are already gone is taken off the log,
     e.g. to finish a call that stopped after deleting them."""
     state = PipelineState(tmp_path / "state")
-    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    state.append_run(make_written_run("r1", ["a"]))
     removed = state.reingest_runs(tmp_path / "catalog", ["r1"], missing_files_ok=True)
     assert [r.run_id for r in removed] == ["r1"]
     assert state.runs() == []
@@ -138,7 +150,7 @@ def test_reingest_unknown_run_changes_nothing(tmp_path):
     state = PipelineState(tmp_path / "state")
     catalog = tmp_path / "catalog"
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
-    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    state.append_run(make_written_run("r1", ["a"]))
     with pytest.raises(KeyError, match="nope"):
         state.reingest_runs(catalog, ["r1", "nope"])
     assert all(p.exists() for p in r1_files)
@@ -150,7 +162,7 @@ def test_reingest_refuses_while_locked(tmp_path):
     state = PipelineState(tmp_path / "state")
     catalog = tmp_path / "catalog"
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
-    state.append_run(make_run("r1", ["a"], file_name="r1.parquet"))
+    state.append_run(make_written_run("r1", ["a"]))
     with state.lock("daily"), pytest.raises(LockHeldError):
         state.reingest_runs(catalog, ["r1"])
     assert all(p.exists() for p in r1_files)
