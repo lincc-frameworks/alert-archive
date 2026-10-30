@@ -289,7 +289,7 @@ and nothing runs on a schedule until PR 9.
 | 3 | **Schema** | `schema.py`: 1101 target columns, casting, `schemaId` mock, unknown-format detection | small |
 | 4 | **State + notify** | `state.py` (ingested log, format-change flag, lock), `notify.py` (email) | small |
 | 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
-| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/`, logged as one run; `AlertReader(conform=True)`; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
+| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/`, logged as one run; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
 | 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
