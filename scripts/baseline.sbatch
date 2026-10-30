@@ -29,10 +29,15 @@
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT
 #SBATCH --output=%x-%j.log
 
-set -euo pipefail
+set -eo pipefail
 export SHELL=/bin/bash  # loadLSST.sh rejects the /bin/sh that a cron-launched sbatch passes on
 export LSST_CONDA_ENV_NAME="${ALERT_ARCHIVE_LSST_ENV:-lsst-scipipe-13.0.0}"
 source /sdf/group/rubin/sw/loadLSST.sh
+
+# Treat unset variables as errors from here on. Not set earlier because the conda
+# activation scripts sourced above read variables that may be unset, e.g. when
+# sbatch passes on an env that was active in the submitting shell.
+set -u
 
 repo="${SLURM_SUBMIT_DIR:?submit this with sbatch from the repo root}"
 cd "$repo"
