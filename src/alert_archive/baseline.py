@@ -26,6 +26,7 @@ from dask.distributed import Client
 from hats_import import pipeline_with_client
 from hats_import.catalog.arguments import ImportArguments
 
+from .config import DaskConfig, get_default_config
 from .daily.increment import leaf_files
 from .pipeline import Pipeline
 from .reader import AlertReader
@@ -41,6 +42,11 @@ The dump's chunks are named ``<alertId prefix>__<start>-<end>.parquet``, and
 all 347 chunks written on 2026-06-26 sort before every later one. Selecting by
 name rather than by file date keeps the baseline the same if files are copied.
 """
+
+BASELINE_DASK = DaskConfig(n_workers=16, memory_limit="24GiB")
+"""Dask settings for the baseline, bigger than the daily default. Reading one dump
+chunk can take about 8 GB; 24 GiB leaves room for memory workers hold on to between
+tasks. 16 x 24 GiB fits a whole milano node (about 500 GB)."""
 
 CATALOG_NAME = "rubin_alert_archive"
 """Catalog name in ``hats.properties``, the same as the frozen catalog's."""
@@ -197,5 +203,5 @@ def _schema_id_counts(catalog_dir) -> dict[int | None, int]:
 
 
 def main(config=None):
-    """Build the baseline with the default (or given) configuration."""
-    return BaselinePipeline(config).execute()
+    """Build the baseline with the given configuration, or the defaults with :data:`BASELINE_DASK`."""
+    return BaselinePipeline(config or get_default_config(dask=BASELINE_DASK)).execute()

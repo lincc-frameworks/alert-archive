@@ -5,7 +5,14 @@ import lsdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from alert_archive.baseline import CATALOG_NAME, DEFAULT_COLUMNS, BaselinePipeline, baseline_chunks, main
+from alert_archive.baseline import (
+    BASELINE_DASK,
+    CATALOG_NAME,
+    DEFAULT_COLUMNS,
+    BaselinePipeline,
+    baseline_chunks,
+    main,
+)
 from alert_archive.config import DaskConfig, PathConfig, get_default_config
 from alert_archive.daily.increment import consolidated_file_name, leaf_files
 from alert_archive.state import PipelineState
@@ -114,3 +121,12 @@ def test_main_runs_baseline(config):
     record = main(config)
     assert record.num_rows == 12
     assert PipelineState(config.paths.state_dir).runs() == [record]
+
+
+def test_main_defaults_to_baseline_dask(monkeypatch):
+    """Without a config, ``main`` uses the bigger baseline Dask settings and the default paths."""
+    seen = []
+    monkeypatch.setattr(BaselinePipeline, "execute", lambda self: seen.append(self.config))
+    main()
+    assert seen[0].dask == BASELINE_DASK
+    assert seen[0].paths == PathConfig()
