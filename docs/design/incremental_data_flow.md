@@ -136,7 +136,8 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   effort".)
 - **One schema for every file.** `write_partitions` checks each night's
   partitions against the catalog's `_common_metadata` schema, nested fields
-  included, and fails before writing anything if a column or type differs.
+  included, and fails if a column or type differs. If only some partitions
+  differ, it deletes the night's files already written, so nothing is left.
   Only nullability and field order are cast to match. This also catches
   schema drift that isn't a new alert format, e.g. from a library upgrade.
   `update_metadata` writes `partition_info.csv` and `hats.properties` before

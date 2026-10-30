@@ -11,7 +11,8 @@ changes:
   can't leave the counts wrong.
 - New partitions are checked against the catalog's schema and cast to it
   before they are written, so every file shares one schema. A schema change
-  fails before anything is written, rather than when the footers are combined.
+  fails and leaves none of the run's files, rather than failing when the footers
+  are combined.
 
 The catalog must use leaf pixel directories (``npix_suffix="/"``), with one
 parquet file per run in each ``Npix=<pixel>/`` directory it touched.
@@ -85,22 +86,38 @@ def write_partitions(catalog, *, base_catalog_dir, parquet_name) -> dict:
     ------
     SchemaMismatchError
         If the new alerts have columns or types the catalog doesn't, or lack
-        some it has. Nothing is written then.
+        some it has. If only some partitions differ, the files already written
+        for the others are deleted again, so nothing of this run is left.
     """
     logger.info("Writing partitions...")
     schema = pq.read_schema(paths.get_common_metadata_pointer(base_catalog_dir))
     check_schema(catalog.meta.to_pyarrow().schema, schema)
 
-    results = catalog.map_partitions(
-        _write_partition,
-        paths.get_upath(base_catalog_dir),
-        parquet_name,
-        schema,
-        include_pixel=True,
-        meta=pd.DataFrame(
-            {"order": pd.Series(dtype=int), "pixel": pd.Series(dtype=int), "rows": pd.Series(dtype=int)}
-        ),
-    ).compute(progress_bar=False)
+    try:
+        results = catalog.map_partitions(
+            _write_partition,
+            paths.get_upath(base_catalog_dir),
+            parquet_name,
+            schema,
+            include_pixel=True,
+            meta=pd.DataFrame(
+                {
+                    "order": pd.Series(dtype=int),
+                    "pixel": pd.Series(dtype=int),
+                    "rows": pd.Series(dtype=int),
+                    "mismatch": pd.Series(dtype=object),
+                }
+            ),
+        ).compute(progress_bar=False)
+    except BaseException:
+        # With a distributed client, other partitions may still be writing; the next
+        # run's remove_orphan_files catches anything they leave.
+        _remove_run_files(base_catalog_dir, parquet_name)
+        raise
+    mismatches = results["mismatch"].dropna()
+    if len(mismatches):
+        _remove_run_files(base_catalog_dir, parquet_name)
+        raise SchemaMismatchError(mismatches.iloc[0])
     return {
         HealpixPixel(order, pixel): rows
         for order, pixel, rows in zip(results["order"], results["pixel"], results["rows"], strict=True)
@@ -112,9 +129,18 @@ def _write_partition(df, pixel, base_catalog_dir, parquet_name, schema) -> pd.Da
     """Write one partition as ``Npix=<pixel>/<parquet_name>``, cast to ``schema``.
 
     Follows LSDB's own partition writer (``lsdb.io.common.write_partition_parquet``),
-    with the schema check and cast added. Returns the pixel and its row count.
+    with the schema check and cast added. Returns the pixel, its row count and,
+    if the partition doesn't match ``schema``, the mismatch message (nothing is
+    written then).
     """
-    result = pd.DataFrame({"order": [pixel.order], "pixel": [pixel.pixel], "rows": [len(df)]})
+    result = pd.DataFrame(
+        {
+            "order": [pixel.order],
+            "pixel": [pixel.pixel],
+            "rows": [len(df)],
+            "mismatch": pd.Series([None], dtype=object),
+        }
+    )
     if len(df) == 0:
         return result
     table = df.to_pyarrow()
@@ -122,7 +148,12 @@ def _write_partition(df, pixel, base_catalog_dir, parquet_name, schema) -> pd.Da
     # Rechecked per partition, since data can differ from the catalog's meta. check_schema
     # refuses real changes (cast would silently drop or null-fill them); cast then fixes
     # only nullability and order, which _metadata needs to match exactly.
-    check_schema(table.schema, schema)
+    # A mismatch is returned rather than raised: lsdb wraps errors in RuntimeError, and
+    # a distributed client doesn't keep the cause, so write_partitions couldn't tell.
+    try:
+        check_schema(table.schema, schema)
+    except SchemaMismatchError as e:
+        return result.assign(rows=0, mismatch=pd.Series([str(e)], dtype=object))
     table = table.select(schema.names).cast(schema)
 
     pixel_path = paths.new_pixel_catalog_file(
@@ -132,6 +163,13 @@ def _write_partition(df, pixel, base_catalog_dir, parquet_name, schema) -> pd.Da
     write_kwargs = get_parquet_write_table_kwargs(table.schema, write_table_kwargs={"row_group_size": len(table)})
     pq.write_table(table, pixel_path.path, filesystem=pixel_path.fs, **write_kwargs)
     return result
+
+
+def _remove_run_files(catalog_dir, parquet_name):
+    """Delete every leaf file named ``parquet_name``, i.e. one run's files."""
+    for path in Path(catalog_dir).glob(f"dataset/Norder=*/Dir=*/Npix=*/{parquet_name}"):
+        logger.warning("Removing %s of the failed run", path)
+        path.unlink()
 
 
 def check_schema(actual: pa.Schema, expected: pa.Schema):

@@ -184,6 +184,21 @@ def test_write_partitions_refuses_schema_change(base_dir):
     assert not list(base_dir.glob("dataset/**/run1.parquet"))
 
 
+def test_write_partitions_refuses_schema_change_in_one_partition(base_dir):
+    """A type that changes in only the last partition still raises SchemaMismatchError, and the
+    files already written for the other partitions are deleted again."""
+    catalog = make_catalog(1000, 300, (0, 360), seed=1)
+    last = catalog.get_healpix_pixels()[-1]
+
+    def change_last(df, pixel):
+        return df.assign(id=df["id"].astype("float64")) if pixel == last else df
+
+    catalog = catalog.map_partitions(change_last, include_pixel=True)
+    with pytest.raises(SchemaMismatchError, match=r"Changed: \['id: int64 -> double'\]"):
+        write_partitions(catalog, base_catalog_dir=base_dir, parquet_name="run1.parquet")
+    assert not list(base_dir.glob("dataset/**/run1.parquet"))
+
+
 def test_write_partitions_casts_nullability(base_dir):
     """New files get the catalog's nullability, so their footers can be combined with the old ones."""
     common = paths.get_common_metadata_pointer(base_dir)
