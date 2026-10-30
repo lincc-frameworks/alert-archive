@@ -46,6 +46,16 @@ The IDs are UTC timestamps of fixed width, so sorting the names sorts the runs b
 """
 
 
+def consolidated_file_name(pixel: HealpixPixel) -> str:
+    """Name of a pixel's consolidated file, e.g. ``Npix=6.parquet``.
+
+    The baseline and the weekly re-imports write these: hats-import's default
+    name in a leaf directory, as in ppdb_hats. Daily runs add
+    ``<run_id>.parquet`` next to them.
+    """
+    return f"Npix={pixel.pixel}.parquet"
+
+
 class SchemaMismatchError(ValueError):
     """Raised when new alerts don't have the catalog's columns and types."""
 
@@ -341,7 +351,8 @@ def update_metadata(existing_catalog):
 def find_orphan_files(catalog_dir, known_file_names) -> list[Path]:
     """Find leaf parquet files that no known run wrote.
 
-    A daily run that crashes after writing its partitions, but before adding
+    Each pixel's consolidated file (:func:`consolidated_file_name`) is never
+    an orphan. A daily run that crashes after writing its partitions, but before adding
     itself to the ingested log, leaves files behind. Its chunks stay off the
     log, so the next run ingests them again under a new name, and the
     leftover files would duplicate those alerts.
@@ -351,8 +362,8 @@ def find_orphan_files(catalog_dir, known_file_names) -> list[Path]:
     catalog_dir : str or path-like
         Base HATS catalog path.
     known_file_names : iterable of str
-        File names that belong in the catalog, e.g. every ``file_name`` in
-        the ingested log plus the baseline's file name.
+        Daily-run file names that belong in the catalog, i.e. every
+        ``file_name`` in the ingested log.
 
     Returns
     -------
@@ -360,7 +371,12 @@ def find_orphan_files(catalog_dir, known_file_names) -> list[Path]:
         The sorted orphaned files.
     """
     known = set(known_file_names)
-    return [path for files in leaf_files(catalog_dir).values() for path in files if path.name not in known]
+    return [
+        path
+        for pixel, files in leaf_files(catalog_dir).items()
+        for path in files
+        if path.name not in known and path.name != consolidated_file_name(pixel)
+    ]
 
 
 def remove_orphan_files(catalog_dir, known_file_names) -> list[Path]:
@@ -375,7 +391,7 @@ def remove_orphan_files(catalog_dir, known_file_names) -> list[Path]:
     Runs never overlap, and each one cleans up before it writes, so real
     orphans always come from one crashed run, newer than every run in the
     log. Anything else more likely means ``known_file_names`` is incomplete,
-    e.g. a truncated log or a missing baseline name, so nothing is deleted.
+    e.g. a truncated log, or files with unexpected names, so nothing is deleted.
 
     Parameters
     ----------
@@ -413,7 +429,7 @@ def _check_orphans_safe_to_delete(orphans: list[Path], known: set[str]):
 
     That means all of these hold (see :func:`remove_orphan_files` for why):
 
-    1. Every name is a run ID (:data:`RUN_FILE_NAME`), not e.g. a baseline file.
+    1. Every name is a run ID (:data:`RUN_FILE_NAME`), not some other file.
     2. They all share one name, so they come from one run.
     3. That run is newer than every run ID in ``known``.
 
@@ -425,7 +441,7 @@ def _check_orphans_safe_to_delete(orphans: list[Path], known: set[str]):
     names = sorted({path.name for path in orphans})
     if not names:
         return
-    hint = "Check that known_file_names lists every run in the log and the baseline."
+    hint = "Check that known_file_names lists every run in the log."
     not_runs = [name for name in names if not RUN_FILE_NAME.fullmatch(name)]
     if not_runs:
         raise ValueError(f"orphaned files with names no daily run writes: {not_runs}. {hint}")
