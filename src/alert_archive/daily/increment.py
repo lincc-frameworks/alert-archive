@@ -160,7 +160,9 @@ def _write_partition(df, pixel, base_catalog_dir, parquet_name, schema) -> pd.Da
         base_catalog_dir, pixel, create_dirs=True, npix_suffix="/", npix_parquet_name=parquet_name
     )
     # One row group per file; hats' default would split every 100k rows.
-    write_kwargs = get_parquet_write_table_kwargs(table.schema, write_table_kwargs={"row_group_size": len(table)})
+    write_kwargs = get_parquet_write_table_kwargs(
+        table.schema, write_table_kwargs={"row_group_size": len(table)}
+    )
     pq.write_table(table, pixel_path.path, filesystem=pixel_path.fs, **write_kwargs)
     return result
 
