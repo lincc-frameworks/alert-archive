@@ -173,14 +173,11 @@ class PipelineState:
 
         The next daily run then ingests their chunks again, into new files
         named by its own run ID. Use this to redo runs that wrote bad data,
-        e.g. the runs flagged for a format change, once the code handles the
-        new format.
+        e.g. after fixing a bug in the transform.
 
         Only use this before the weekly re-import has merged the runs' files
         into the catalog. After that, there are no separate files to delete,
         and re-ingesting the chunks would add their alerts a second time.
-        While the format-change flag is set, the weekly re-import doesn't run,
-        so flagged runs are safe to redo until the flag is cleared.
 
         Every run is checked before anything is deleted. Files are deleted
         before the log is changed, so if this stops partway, the runs are
@@ -191,9 +188,8 @@ class PipelineState:
 
         Only the runs' parquet files are deleted. The catalog's skymaps and
         metadata (partition info, row counts) still count them until the next
-        weekly re-import rebuilds them. That's accepted: re-ingesting happens
-        only while the format-change flag is set, so nothing is published
-        from the working catalog in the meantime.
+        daily run, which rebuilds both from the files on disk. Users reading
+        the working catalog in between can see counts that are too high.
 
         Parameters
         ----------
