@@ -7,7 +7,8 @@ Adapted from ``ppdb_hats/config.py`` in ppdb_hats
 (https://github.com/astronomy-commons/ppdb_hats, commit 241b4f2).
 """
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -45,9 +46,15 @@ class PathConfig:
     ----------
     root : pathlib.Path
         Root directory of the v2 archive.
+    tmp_dir : pathlib.Path or None
+        Where each run makes its temporary directory, which is also Dask's
+        local directory for worker spill. Defaults to ``$LSCRATCH`` (node-local
+        scratch on S3DF batch nodes) when it's set, else the system default
+        (usually ``/tmp``, which can be small).
     """
 
     root: Path = Path("/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2")
+    tmp_dir: Path | None = field(default_factory=lambda: os.environ.get("LSCRATCH") or None)
 
     @property
     def landing_dir(self) -> Path:
@@ -68,6 +75,8 @@ class PathConfig:
         """Ensure paths are Path objects"""
         if isinstance(self.root, str):
             self.root = Path(self.root)
+        if isinstance(self.tmp_dir, str):
+            self.tmp_dir = Path(self.tmp_dir)
 
 
 @dataclass

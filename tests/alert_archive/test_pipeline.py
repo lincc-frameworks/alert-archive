@@ -1,6 +1,6 @@
 import logging
 
-from alert_archive.config import DaskConfig, get_default_config
+from alert_archive.config import DaskConfig, PathConfig, get_default_config
 from alert_archive.pipeline import Pipeline
 from dask.distributed import Client
 
@@ -25,6 +25,15 @@ def test_execute_runs_with_client_and_tmp_dir():
     assert args == (42,)
     assert kwargs == {"key": "value"}
     assert logging.getLogger("alert_archive").level == logging.INFO
+
+
+def test_execute_makes_tmp_dir_under_configured_dir(tmp_path):
+    """The run's temp dir is made inside ``paths.tmp_dir``."""
+    config = get_default_config(
+        dask=DaskConfig(n_workers=1, memory_limit="1GiB"), paths=PathConfig(tmp_dir=tmp_path)
+    )
+    _, tmp_dir, *_ = RecordingPipeline(config).execute()
+    assert tmp_dir.parent == tmp_path
 
 
 def test_default_config():

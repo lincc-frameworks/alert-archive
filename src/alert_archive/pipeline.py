@@ -46,8 +46,9 @@ class Pipeline(ABC):
     def execute(self, *args, **kwargs):
         """Execute the pipeline with a Dask client and temporary directory.
 
-        The method creates a temporary directory and a Dask client and
-        then delegates to :meth:`run`.
+        The method creates a temporary directory (under
+        ``config.paths.tmp_dir``) and a Dask client and then delegates to
+        :meth:`run`.
 
         Parameters
         ----------
@@ -61,7 +62,7 @@ class Pipeline(ABC):
         """
         self._configure_logging()
         logger.info("Starting pipeline...")
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(dir=self.config.paths.tmp_dir) as tmp_dir:
             return self._run_with_client(Path(tmp_dir), *args, **kwargs)
 
     def _configure_logging(self):
