@@ -83,10 +83,12 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   in a new directory from the parquet dump: a baseline hats-import of the
   first chunks, then the remaining chunks replayed through the daily pipeline.
   The replay is also the mock source until live alerts flow, and it tests the
-  increment code on real alerts. The dump has 20.6M rows, against 15.3M in the
-  frozen catalog. Its files fall into four write dates: 347 from Jun 26 (likely
-  the frozen catalog's input, so a natural baseline), then 87 from Jul 13,
-  10 from Jul 21 and 66 from Jul 31 (about 5.3M newer alerts to replay).
+  increment code on real alerts. Its files fall into four write dates: 347
+  from Jun 26 (the baseline), then 87 from Jul 13, 10 from Jul 21 and 66 from
+  Jul 31 (to replay). The dump has 20.6M rows but only 16.5M unique alerts.
+  The extra rows are exact copies, in chunks with 5-digit alertId prefixes.
+  The frozen catalog, as rebuilt on 2026-10-20, holds exactly those
+  16.5M alerts, so after the replay both catalogs should have the same alerts.
 - **Location:** `/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/`,
   holding a `working/` catalog plus the published versions that lsdb#1536
   needs for promote and rollback.

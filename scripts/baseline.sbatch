@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build the working catalog (rubin_alert_archive_v2/working) from the parquet
-# dump's Jun 26 chunks. See "The baseline" in docs/design/incremental_data_flow.md.
+# dump's first chunks (written Jun 26). See "The baseline" in
+# docs/design/incremental_data_flow.md.
 #
 # Run it once, from the root of a clone whose editable install
 # (pip install -e .) points at that clone, with no uncommitted changes:
