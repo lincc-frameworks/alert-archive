@@ -63,4 +63,11 @@ echo "LSST env: $LSST_CONDA_ENV_NAME"
 umask 0002  # group-writable, so other rubin_users can read and later jobs can write
 
 # Default Dask settings (8 workers x 16 GiB), temp files under $LSCRATCH (node-local).
-python -c "from alert_archive.mock.replay import main; print(main(max_nights=${MAX_NIGHTS:-None}))"
+# TEMPORARY: landing/ isn't group-writable yet, so the replay copies into (and the
+# daily runs read from) our own replay_landing/. Remove before the PR for step 7.
+python -c "
+from alert_archive.config import PathConfig
+PathConfig.landing_dir = property(lambda self: self.root / 'replay_landing')
+from alert_archive.mock.replay import main
+print(main(max_nights=${MAX_NIGHTS:-None}))
+"
