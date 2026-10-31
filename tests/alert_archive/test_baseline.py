@@ -30,7 +30,8 @@ DUPLICATE_CHUNK = "17005__00000000-00000002.parquet"
 
 @pytest.fixture
 def dump_dir(tmp_path, raw_alerts):
-    """A small dump: the 12 sample alerts split over two baseline chunks, plus a later and a duplicate chunk."""
+    """A small dump: the 12 sample alerts split over two baseline chunks, plus a later
+    and a duplicate chunk."""
     path = tmp_path / "dump"
     path.mkdir()
     pq.write_table(raw_alerts.slice(0, 6), path / BASELINE_CHUNKS[0])
