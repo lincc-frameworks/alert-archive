@@ -288,11 +288,12 @@ the smallest level that contains it:
 
 ## Implementation plan
 
-Small PRs, each reviewable in one sitting. PRs 2–4 don't depend on each
-other or on the cluster. Nothing touches the shared filesystem until PR 6,
-and nothing runs on a schedule until PR 9.
+One small PR per step, each reviewable in one sitting. Step numbers aren't
+GitHub PR numbers. Steps 2–4 don't depend on each other or on the cluster.
+Nothing touches the shared filesystem until step 6, and nothing runs on a
+schedule until step 9.
 
-| # | PR | Contents | Size |
+| Step | PR | Contents | Size |
 |---|---|---|---|
 | 1 | **Design doc** | This document | no code |
 | 2 | **Reader** | `reader.py` (the notebook's `AlertReader`), small test fixtures cut from the dump, tests | small |
