@@ -51,10 +51,15 @@ class PathConfig:
         local directory for worker spill. Defaults to ``$LSCRATCH`` (node-local
         scratch on S3DF batch nodes) when it's set, else the system default
         (usually ``/tmp``, which can be small).
+    dump_dir : pathlib.Path
+        Neven Caplar's parquet dump of the alert archive, outside the root.
+        The baseline is built from its first chunks, and the rest are
+        replayed through the daily pipeline.
     """
 
     root: Path = Path("/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2")
     tmp_dir: Path | None = field(default_factory=lambda: os.environ.get("LSCRATCH") or None)
+    dump_dir: Path = Path("/sdf/data/rubin/user/ncaplar/alert-parquet")
 
     @property
     def landing_dir(self) -> Path:
@@ -77,6 +82,8 @@ class PathConfig:
             self.root = Path(self.root)
         if isinstance(self.tmp_dir, str):
             self.tmp_dir = Path(self.tmp_dir)
+        if isinstance(self.dump_dir, str):
+            self.dump_dir = Path(self.dump_dir)
 
 
 @dataclass
@@ -89,8 +96,8 @@ class ImportConfig:
         Column name for right ascension.
     dec_column : str
         Column name for declination.
-    byte_pixel_threshold : int
-        Threshold (bytes) for splitting pixels.
+    pixel_threshold : int
+        Most rows per partition; hats-import splits pixels above it.
     resume : bool
         Whether to resume an interrupted import.
     simple_progress_bar : bool
@@ -99,7 +106,7 @@ class ImportConfig:
 
     ra_column: str = "ra"
     dec_column: str = "dec"
-    byte_pixel_threshold: int = 1 << 30  # 1 GiB
+    pixel_threshold: int = 200_000  # the frozen catalog's largest partition is just under this
     resume: bool = False
     simple_progress_bar: bool = True
 

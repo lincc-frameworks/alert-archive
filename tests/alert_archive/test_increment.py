@@ -8,6 +8,7 @@ import pytest
 from alert_archive.daily.increment import (
     SchemaMismatchError,
     check_schema,
+    consolidated_file_name,
     find_orphan_files,
     leaf_files,
     remove_orphan_files,
@@ -40,13 +41,12 @@ def make_catalog(start_id, num_rows, ra_range, seed):
 
 @pytest.fixture
 def base_dir(tmp_path):
-    """A leaf-directory catalog of 200 points with ra in [0, 90), in files named ``base.parquet``."""
+    """A leaf-directory catalog of 200 points with ra in [0, 90), in consolidated files."""
     path = tmp_path / "working"
     make_catalog(0, 200, (0, 90), seed=0).write_catalog(
         path,
         as_collection=False,
         npix_suffix="/",
-        npix_parquet_name="base.parquet",
         skymap_alt_orders=[1],
         progress_bar=False,
     )
@@ -75,7 +75,7 @@ def test_leaf_files_skips_empty_pixel_dirs(base_dir):
     (base_dir / "dataset" / "Norder=2" / "Dir=0" / "Npix=7").mkdir(exist_ok=True)
     files = leaf_files(base_dir)
     assert HealpixPixel(ORDER, 7) not in files
-    assert all(len(f) == 1 and f[0].name == "base.parquet" for f in files.values())
+    assert all(len(f) == 1 and f[0].name == consolidated_file_name(pixel) for pixel, f in files.items())
     assert set(files) == set(hats.read_hats(base_dir).get_healpix_pixels())
 
 
@@ -98,7 +98,10 @@ def test_increment_adds_rows_and_pixels(base_dir):
     assert set(catalog.get_healpix_pixels()) == set(files)
     pixel_rows = [sum(len(pd.read_parquet(p)) for p in f) for f in files.values()]
     assert info.hats_max_rows == max(pixel_rows)
-    assert {p.name for f in files.values() for p in f} == {"base.parquet", "run1.parquet"}
+    assert all(
+        {p.name for p in f} <= {consolidated_file_name(pixel), "run1.parquet"} for pixel, f in files.items()
+    )
+    assert any(p.name == "run1.parquet" for f in files.values() for p in f)
 
     df = lsdb.open_catalog(base_dir).compute()
     assert sorted(df["id"]) == [*range(200), *range(1000, 1100)]
@@ -302,8 +305,9 @@ def test_update_metadata_empty_catalog(base_dir):
         update_metadata(hats.read_hats(base_dir))
 
 
-RUN1, RUN2, CRASHED = "20261027T031500Z", "20261028T031500Z", "20261029T031500Z"
-"""Run IDs in start order: two logged runs, then one that crashed before reaching the log."""
+BASELINE, RUN1, RUN2, CRASHED = "20261026T120000Z", "20261027T031500Z", "20261028T031500Z", "20261029T031500Z"
+"""Run IDs in start order: the baseline (whose files are consolidated), two logged daily runs,
+then one that crashed before reaching the log."""
 
 
 @pytest.fixture
@@ -320,8 +324,8 @@ def all_files(catalog_dir):
 
 
 def test_find_and_remove_orphan_files(crashed_dir):
-    """Files from the crashed run are found and deleted; known files stay."""
-    known = ["base.parquet", f"{RUN1}.parquet", f"{RUN2}.parquet"]
+    """Files from the crashed run are found and deleted; known and consolidated files stay."""
+    known = [f"{BASELINE}.parquet", f"{RUN1}.parquet", f"{RUN2}.parquet"]
     crashed = sorted(crashed_dir.glob(f"dataset/**/{CRASHED}.parquet"))
     assert crashed
 
@@ -330,12 +334,13 @@ def test_find_and_remove_orphan_files(crashed_dir):
 
     assert remove_orphan_files(crashed_dir, known) == crashed
     assert not any(p.exists() for p in crashed)
-    assert {p.name for p in all_files(crashed_dir)} == set(known)
+    for pixel, files in leaf_files(crashed_dir).items():
+        assert {p.name for p in files} <= {consolidated_file_name(pixel), *known}
 
 
 def test_remove_orphan_files_no_orphans(crashed_dir):
     """With every file known, nothing is deleted."""
-    known = ["base.parquet", f"{RUN1}.parquet", f"{RUN2}.parquet", f"{CRASHED}.parquet"]
+    known = [f"{BASELINE}.parquet", f"{RUN1}.parquet", f"{RUN2}.parquet", f"{CRASHED}.parquet"]
     assert remove_orphan_files(crashed_dir, known) == []
 
 
@@ -343,9 +348,8 @@ def test_remove_orphan_files_no_orphans(crashed_dir):
     ("known", "match"),
     [
         pytest.param([], "empty", id="empty"),
-        pytest.param([f"{RUN1}.parquet", f"{RUN2}.parquet"], "no daily run writes", id="baseline missing"),
-        pytest.param(["base.parquet", f"{RUN2}.parquet"], "from 2 runs", id="log missing a run"),
-        pytest.param(["base.parquet"], "from 3 runs", id="log empty"),
+        pytest.param([f"{BASELINE}.parquet", f"{RUN2}.parquet"], "from 2 runs", id="log missing a run"),
+        pytest.param([f"{BASELINE}.parquet"], "from 3 runs", id="log has only the baseline"),
     ],
 )
 def test_remove_orphan_files_refuses_incomplete_known(crashed_dir, known, match):
@@ -359,7 +363,21 @@ def test_remove_orphan_files_refuses_incomplete_known(crashed_dir, known, match)
 def test_remove_orphan_files_refuses_older_run(crashed_dir):
     """A lone unknown run older than the newest known run means the log lost it."""
     before = all_files(crashed_dir)
-    known = ["base.parquet", f"{RUN2}.parquet", f"{CRASHED}.parquet"]
+    known = [f"{BASELINE}.parquet", f"{RUN2}.parquet", f"{CRASHED}.parquet"]
     with pytest.raises(ValueError, match="older than the newest known run"):
+        remove_orphan_files(crashed_dir, known)
+    assert all_files(crashed_dir) == before
+
+
+def test_orphan_check_refuses_stray_files(crashed_dir):
+    """A file that is neither consolidated nor named like a run is never deleted, even if unknown.
+
+    A consolidated name in the wrong pixel's directory counts as stray too."""
+    pixel, files = next(iter(leaf_files(crashed_dir).items()))
+    other = HealpixPixel(pixel.order, pixel.pixel + 1)
+    (files[0].parent / consolidated_file_name(other)).touch()
+    known = [f"{BASELINE}.parquet", f"{RUN1}.parquet", f"{RUN2}.parquet", f"{CRASHED}.parquet"]
+    before = all_files(crashed_dir)
+    with pytest.raises(ValueError, match="no daily run writes"):
         remove_orphan_files(crashed_dir, known)
     assert all_files(crashed_dir) == before

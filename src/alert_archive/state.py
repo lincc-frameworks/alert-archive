@@ -58,7 +58,13 @@ class RunRecord:
 
     @property
     def file_name(self) -> str | None:
-        """Name of the parquet file this run wrote in each pixel, or None if it wrote nothing."""
+        """Name of the parquet file this run wrote in each pixel, or None if it wrote nothing.
+
+        The baseline's record is the exception: it wrote consolidated
+        ``Npix=<pixel>.parquet`` files (see :mod:`alert_archive.baseline`), so
+        no file has this name. :meth:`PipelineState.reingest_runs` then finds
+        nothing to delete and refuses, which is the right outcome.
+        """
         return f"{self.run_id}.parquet" if self.num_rows else None
 
     def __post_init__(self):

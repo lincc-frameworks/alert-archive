@@ -20,7 +20,7 @@ flowchart TD
     DUMP -.->|"replay chunk by chunk<br/>(backfill + mock)"| LAND
 
     %% ---------- bootstrap ----------
-    BASE["Baseline build: full hats-import<br/>of the first chunks (notebook code)"]
+    BASE["Baseline build: full hats-import<br/>of the Jun 26 chunks (baseline.py)"]
     DUMP --> BASE
     WORK[("New working catalog<br/>Npix=N/ directories, 1101 columns<br/>main table only, grows nightly")]
     BASE --> WORK
@@ -83,13 +83,36 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   in a new directory from the parquet dump: a baseline hats-import of the
   first chunks, then the remaining chunks replayed through the daily pipeline.
   The replay is also the mock source until live alerts flow, and it tests the
-  increment code on real alerts. The dump has 20.6M rows, against 15.3M in the
-  frozen catalog. Its files fall into four write dates: 347 from Jun 26 (likely
-  the frozen catalog's input, so a natural baseline), then 87 from Jul 13,
-  10 from Jul 21 and 66 from Jul 31 (about 5.3M newer alerts to replay).
+  increment code on real alerts. Its files fall into four write dates: 347
+  from Jun 26 (the baseline), then 87 from Jul 13, 10 from Jul 21 and 66 from
+  Jul 31 (to replay). The dump has 20.6M rows but only 16.5M unique alerts.
+  The extra rows are exact copies, in chunks with 5-digit alertId prefixes.
+  The frozen catalog, as rebuilt on 2026-10-20, holds exactly those
+  16.5M alerts, so after the replay both catalogs should have the same alerts.
 - **Location:** `/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/`,
   holding a `working/` catalog plus the published versions that lsdb#1536
   needs for promote and rollback.
+- **The baseline** (`baseline.py`) imports the 263 Jun 26 chunks with 6-digit
+  prefixes (10.77M alerts) into an empty `working/` with hats-import. They are
+  picked by name: all of them sort before every later chunk, up to
+  `170587__00100000-00138048.parquet`. The 84 chunks with 5-digit prefixes
+  (`17005__*`, `17006__*`) are skipped, and the replay must skip them too:
+  the raw archive filed those alerts twice, so every one is also in a 6-digit
+  chunk. It
+  refuses to run if `working/` or the ingested log already exists, and it
+  stops on any format change. The import is logged as one run in
+  `ingested.jsonl`, so the replay skips its chunks. The catalog is named
+  `rubin_alert_archive` and has the frozen catalog's default columns.
+  Partitions hold at most 200k rows (hats-import's `pixel_threshold`). The
+  frozen catalog's largest partition is just under that, so it was probably
+  built the same way. A 1 GiB `byte_pixel_threshold` was tried first, but
+  hats-import's in-memory size estimate is large for these alerts, so it made
+  1,417 partitions of about 8k rows.
+  It's run once as a Slurm job, `scripts/baseline.sbatch` (usage in its header).
+- **File naming follows ppdb_hats.** Each pixel is a leaf directory. Its
+  consolidated file, written by the baseline and later by each weekly
+  re-import, keeps hats-import's default name `Npix=<pixel>.parquet`. Each
+  daily run adds a `<run_id>.parquet` next to it.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
   - `ingested.jsonl`: one line per daily run, with the run ID, its start
@@ -180,10 +203,11 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Orphaned files:** a run that crashes after writing its files but before
   adding itself to `ingested.jsonl` leaves files that no run owns. Its chunks
   get ingested again next time, so the daily run deletes leaf files whose
-  names aren't in the log (or the baseline) before it ingests. True orphans
-  always come from one crashed run, newer than every logged run, so the
-  cleanup refuses to delete anything else. A truncated log or a missing
-  baseline name then stops the run instead of deleting the catalog.
+  names aren't in the log before it ingests. A pixel's consolidated
+  `Npix=<pixel>.parquet` is never an orphan. True orphans always come from one
+  crashed run, newer than every logged run, so the cleanup refuses to delete
+  anything else. A truncated log or a stray file then stops the run instead
+  of deleting the catalog.
 
 ### Error handling
 
@@ -264,18 +288,19 @@ the smallest level that contains it:
 
 ## Implementation plan
 
-Small PRs, each reviewable in one sitting. PRs 2–4 don't depend on each
-other or on the cluster. Nothing touches the shared filesystem until PR 6,
-and nothing runs on a schedule until PR 9.
+One small PR per step, each reviewable in one sitting. Step numbers aren't
+GitHub PR numbers. Steps 2–4 don't depend on each other or on the cluster.
+Nothing touches the shared filesystem until step 6, and nothing runs on a
+schedule until step 9.
 
-| # | PR | Contents | Size |
+| Step | PR | Contents | Size |
 |---|---|---|---|
 | 1 | **Design doc** | This document | no code |
 | 2 | **Reader** | `reader.py` (the notebook's `AlertReader`), small test fixtures cut from the dump, tests | small |
 | 3 | **Schema** | `schema.py`: 1101 target columns, casting, `schemaId` mock, unknown-format detection | small |
 | 4 | **State + notify** | `state.py` (ingested log, format-change flag, lock), `notify.py` (email) | small |
 | 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
-| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` | small |
+| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` (skipping the 5-digit duplicates; 200k-row partitions), logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
 | 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |

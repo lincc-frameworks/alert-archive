@@ -36,4 +36,10 @@ def test_get_default_config_overrides(tmp_path):
     config = get_default_config(paths=PathConfig(root=tmp_path))
     assert config.paths.root == tmp_path
     assert config.dask == DaskConfig()
-    assert config.import_config.byte_pixel_threshold == 1 << 30
+    assert config.import_config.pixel_threshold == 200_000
+
+
+def test_dump_dir(tmp_path):
+    """The dump defaults to Neven's parquet dump on S3DF; strings become paths."""
+    assert PathConfig().dump_dir == Path("/sdf/data/rubin/user/ncaplar/alert-parquet")
+    assert PathConfig(dump_dir=str(tmp_path)).dump_dir == tmp_path
