@@ -42,6 +42,14 @@ all 347 chunks written on 2026-06-26 sort before every later one. Selecting by
 name rather than by file date keeps the baseline the same if files are copied.
 """
 
+DUPLICATE_PREFIXES = {"17005", "17006"}
+"""AlertId prefixes of dump chunks that only hold copies of other chunks' alerts.
+
+The raw alert archive filed some alerts under 5-digit prefix directories as
+well as their usual 6-digit ones, and the dump converted both. Every alert in
+these chunks is also, identical, in a 6-digit chunk, so they're skipped.
+"""
+
 BASELINE_DASK = DaskConfig(n_workers=16, memory_limit="24GiB")
 """Dask settings for the baseline, bigger than the daily default. Reading one dump
 chunk can take about 8 GB; 24 GiB leaves room for memory workers hold on to between
@@ -89,7 +97,8 @@ def baseline_chunks(dump_dir, last_chunk: str = LAST_BASELINE_CHUNK) -> list[Pat
         Directory of the parquet dump.
     last_chunk : str
         Name of the last chunk to include. Every chunk whose name sorts at or
-        before it is included.
+        before it is included, except those with a :data:`DUPLICATE_PREFIXES`
+        prefix.
 
     Returns
     -------
@@ -101,7 +110,11 @@ def baseline_chunks(dump_dir, last_chunk: str = LAST_BASELINE_CHUNK) -> list[Pat
     FileNotFoundError
         If no chunk in ``dump_dir`` sorts at or before ``last_chunk``.
     """
-    chunks = sorted(p for p in Path(dump_dir).glob("*.parquet") if p.name <= last_chunk)
+    chunks = sorted(
+        p
+        for p in Path(dump_dir).glob("*.parquet")
+        if p.name <= last_chunk and p.name.split("__")[0] not in DUPLICATE_PREFIXES
+    )
     if not chunks:
         raise FileNotFoundError(f"no parquet chunks up to {last_chunk} in {dump_dir}")
     return chunks
@@ -158,7 +171,7 @@ class BaselinePipeline(Pipeline):
                 file_reader=AlertReader(),
                 ra_column=import_config.ra_column,
                 dec_column=import_config.dec_column,
-                byte_pixel_threshold=import_config.byte_pixel_threshold,
+                pixel_threshold=import_config.pixel_threshold,
                 npix_suffix="/",
                 addl_hats_properties={"hats_cols_default": DEFAULT_COLUMNS},
                 tmp_dir=tmp_dir,
