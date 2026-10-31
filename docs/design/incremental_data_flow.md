@@ -109,6 +109,23 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   hats-import's in-memory size estimate is large for these alerts, so it made
   1,417 partitions of about 8k rows.
   It's run once as a Slurm job, `scripts/baseline.sbatch` (usage in its header).
+- **The replay** (`mock/replay.py`) feeds the dump's later chunks (72 alertId
+  prefixes, 5.69M alerts) through the daily run, one prefix per run, since a
+  prefix is roughly one night. For each prefix it copies the chunks into
+  `landing/` and runs the daily pipeline, so the replay takes the same path as
+  live alerts. Daily runs during the replay don't email; the replay sends one
+  summary at the end. It skips prefixes that are already ingested, so it can be
+  stopped and resubmitted, and it stops at the first format change. Chunks
+  already in `landing/` (e.g. from the converter) get ingested with the first
+  night. Run it with `scripts/replay.sbatch`.
+- **The daily run** (`daily/run.py`), under the lock: stops if the
+  format-change flag is set, removes orphans, finds landing chunks not yet
+  ingested, checks every chunk's format from its parquet footer, then imports
+  them with hats-import aligned to the working catalog's pixels
+  (`existing_pixels`) and writes them in with `write_partitions`. Chunks not
+  named `<6-digit prefix>__<start>-<end>.parquet` are skipped and reported,
+  which keeps out duplicate directories like `17005/`. A run with nothing new
+  is still logged and emailed, so a missing email means a missing run.
 - **File naming follows ppdb_hats.** Each pixel is a leaf directory. Its
   consolidated file, written by the baseline and later by each weekly
   re-import, keeps hats-import's default name `Npix=<pixel>.parquet`. Each
@@ -170,12 +187,14 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
      share one schema;
   3. clears the flag. The next daily run ingests the waiting chunks normally.
 
-  For now the format is detected from the mocked `schemaId` and the cast
-  report; once the converter keeps the real `schemaId`, it can stop at the
-  first alert with a new one. We expect this at most once or twice over the next
-  few months, so it is meant to be an all-hands event rather than handled
-  automatically. (Decided 2026-10-29; this replaces "keep ingesting best
-  effort".)
+  The daily run checks each chunk's format from its parquet footer before
+  importing anything: the columns go through the same conversion as the
+  alerts, and the format IDs come from the `schemaId` column (or the mock).
+  Values that fail to convert can only be found by reading the alerts; that
+  stops the import with an error but doesn't set the flag. We expect this at
+  most once or twice over the next few months, so it is meant to be an all-hands
+  event rather than handled automatically. (Decided 2026-10-29; this replaces
+  "keep ingesting best effort".)
 - **One schema for every file.** `write_partitions` checks each night's
   partitions against the catalog's `_common_metadata` schema, nested fields
   included, and fails if a column or type differs. If only some partitions
@@ -219,8 +238,8 @@ the smallest level that contains it:
 | Level | Example | What happens | How it's recovered |
 |---|---|---|---|
 | **Format** | A new alert format changes a field's type, or adds or removes fields | The run writes nothing, sets the format-change flag and sends an email. Daily runs and the weekly re-import stop while the flag is set. | Add the format; if the catalog's columns change, re-import the whole catalog; clear the flag. The waiting chunks were never logged, so the next run ingests them. |
-| **Chunk** | A corrupt or truncated parquet file | That chunk is skipped and its error recorded; every other chunk is ingested. | Automatic: a skipped chunk never enters `ingested.jsonl`, so the next nightly run finds it again. If it needs a code fix, the first run after the fix picks it up. |
-| **Run** | Catalog not writable, disk full, lock held | The run stops with an error rather than risk a half-written catalog. | Fix the cause and re-run. Safe because metadata is recomputed from disk. |
+| **Chunk** | A chunk whose footer can't be read, or with an unexpected name | That chunk is skipped and its error recorded; every other chunk is ingested. | Automatic: a skipped chunk never enters `ingested.jsonl`, so the next nightly run finds it again. If it needs a code fix, the first run after the fix picks it up. |
+| **Run** | Catalog not writable, disk full, lock held, a chunk that breaks only once its alerts are read | The run stops with an error rather than risk a half-written catalog. Files it already wrote are removed by the next run's orphan cleanup. | Fix the cause and re-run. Safe because metadata is recomputed from disk. |
 
 - **One summary email per run**, not one per error. It lists format changes
   (with the fields that differ), skipped chunks with their errors,
@@ -301,7 +320,7 @@ schedule until step 9.
 | 4 | **State + notify** | `state.py` (ingested log, format-change flag, lock), `notify.py` (email) | small |
 | 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
 | 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` (skipping the 5-digit duplicates; 200k-row partitions), logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
-| 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
+| 7 | **Daily run + replay** | `daily/run.py` (incl. footer format check, stop + flag + email on an unknown format, orphan cleanup at start, skips misnamed chunks), `mock/replay.py` (one prefix per run, via `landing/`), `scripts/replay.sbatch`, end-to-end test (baseline → replay) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
 | 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |
