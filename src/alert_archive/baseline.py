@@ -1,9 +1,8 @@
 """Build the working catalog from the first chunks of the parquet dump.
 
 This runs once, before any daily run. It imports the dump's chunks from
-2026-06-26 (very likely the frozen catalog's input) with hats-import into an
-empty ``working/`` directory. The later chunks are replayed through the daily
-pipeline afterwards.
+2026-06-26 with hats-import into an empty ``working/`` directory. The later
+chunks are replayed through the daily pipeline afterwards.
 
 The catalog uses leaf pixel directories, and follows ppdb_hats' file naming:
 consolidated files, from this import and later weekly re-imports, keep
