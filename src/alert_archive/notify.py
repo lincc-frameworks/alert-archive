@@ -111,7 +111,8 @@ def daily_summary(
         lines += [
             "",
             "FORMAT CHANGE",
-            "  The flag is set; Saturday's re-import will skip until it's cleared.",
+            "  Nothing was ingested. The flag is set; daily runs and Saturday's re-import",
+            "  stop until it's cleared. Add the format, then clear the flag.",
             *(f"  {k}: {v}" for k, v in format_change.items()),
         ]
 
@@ -122,4 +123,28 @@ def daily_summary(
             note = "" if since == record.started else f" (failing since {since})"
             lines.append(f"  {chunk}{note}: {error}")
 
+    return subject, "\n".join(lines) + "\n"
+
+
+def flag_set_summary(flag: dict) -> tuple[str, str]:
+    """Build the email for a daily run that stopped because the format-change flag is set.
+
+    Parameters
+    ----------
+    flag : dict
+        The flag's contents, from :meth:`PipelineState.format_change`.
+
+    Returns
+    -------
+    tuple[str, str]
+        The subject and body.
+    """
+    subject = f"{PROBLEM_MARK} daily: not run, format-change flag set since {flag['flagged_at']}"
+    lines = [
+        "The format-change flag is set, so the daily run ingested nothing.",
+        "Add the format, then clear the flag; the next run ingests the waiting chunks.",
+        "",
+        "Runs that found a format change:",
+        *(f"  {run['run_id']} ({run['time']}): {run['details']}" for run in flag["runs"]),
+    ]
     return subject, "\n".join(lines) + "\n"
