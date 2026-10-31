@@ -96,8 +96,8 @@ class ImportConfig:
         Column name for right ascension.
     dec_column : str
         Column name for declination.
-    byte_pixel_threshold : int
-        Threshold (bytes) for splitting pixels.
+    pixel_threshold : int
+        Most rows per partition; hats-import splits pixels above it.
     resume : bool
         Whether to resume an interrupted import.
     simple_progress_bar : bool
@@ -106,7 +106,7 @@ class ImportConfig:
 
     ra_column: str = "ra"
     dec_column: str = "dec"
-    byte_pixel_threshold: int = 1 << 30  # 1 GiB
+    pixel_threshold: int = 200_000  # the frozen catalog's largest partition is just under this
     resume: bool = False
     simple_progress_bar: bool = True
 

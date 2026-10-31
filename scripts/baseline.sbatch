@@ -60,5 +60,5 @@ echo "LSST env: $LSST_CONDA_ENV_NAME"
 
 umask 0002  # group-writable, so other rubin_users can read and later jobs can write
 
-# Defaults: 8 Dask workers x 16 GiB, temp files under $LSCRATCH (node-local).
+# 16 Dask workers x 24 GiB (BASELINE_DASK), temp files under $LSCRATCH (node-local).
 python -c "from alert_archive.baseline import main; print(main())"
