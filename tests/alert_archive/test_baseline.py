@@ -24,15 +24,19 @@ BASELINE_CHUNKS = ["170019__00000000-00000006.parquet", "170020__00000000-000000
 LATER_CHUNK = "313629__00000000-00000002.parquet"
 """A fixture chunk named like the dump's Jul 31 chunks, after the baseline."""
 
+DUPLICATE_CHUNK = "17005__00000000-00000002.parquet"
+"""A fixture chunk named like the dump's 5-digit duplicates, inside the baseline's name range."""
+
 
 @pytest.fixture
 def dump_dir(tmp_path, raw_alerts):
-    """A small dump: the 12 sample alerts split over two baseline chunks, plus one later chunk."""
+    """A small dump: the 12 sample alerts split over two baseline chunks, plus a later and a duplicate chunk."""
     path = tmp_path / "dump"
     path.mkdir()
     pq.write_table(raw_alerts.slice(0, 6), path / BASELINE_CHUNKS[0])
     pq.write_table(raw_alerts.slice(6), path / BASELINE_CHUNKS[1])
     pq.write_table(raw_alerts.slice(0, 2), path / LATER_CHUNK)
+    pq.write_table(raw_alerts.slice(6, 2), path / DUPLICATE_CHUNK)
     return path
 
 
@@ -49,7 +53,10 @@ def run_baseline(config, tmp_path, chunks=None):
 
 
 def test_baseline_chunks_stop_at_last_chunk(dump_dir):
-    """Chunks up to the last baseline chunk are selected, sorted; later ones are left for the replay."""
+    """Chunks up to the last baseline chunk are selected, sorted; later ones are left for the replay.
+
+    The duplicate chunk sorts before the last baseline chunk but is skipped.
+    """
     assert [p.name for p in baseline_chunks(dump_dir)] == BASELINE_CHUNKS
     assert [p.name for p in baseline_chunks(dump_dir, last_chunk=BASELINE_CHUNKS[0])] == BASELINE_CHUNKS[:1]
 
@@ -110,7 +117,9 @@ def test_baseline_stops_on_format_change(config, tmp_path, dump_dir, raw_alerts)
     """A chunk in an unsupported format stops the import, and nothing is logged."""
     changed = raw_alerts.append_column("newField", pa.array([1.0] * len(raw_alerts)))
     pq.write_table(changed, dump_dir / BASELINE_CHUNKS[0])
-    with pytest.raises(Exception, match="don't fit the catalog's format"):
+    # The mapping stage reads only coordinates, so the error comes from the splitting
+    # stage, which hats-import reports as a generic failure (the FormatChangeError is logged).
+    with pytest.raises(RuntimeError, match="splitting stages failed"):
         run_baseline(config, tmp_path)
     assert PipelineState(config.paths.state_dir).runs() == []
 

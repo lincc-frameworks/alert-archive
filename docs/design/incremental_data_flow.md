@@ -92,15 +92,22 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **Location:** `/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/`,
   holding a `working/` catalog plus the published versions that lsdb#1536
   needs for promote and rollback.
-- **The baseline** (`baseline.py`) imports the 347 Jun 26 chunks into an empty
-  `working/` with hats-import. They are picked by name: all of them sort
-  before every later chunk, up to `170587__00100000-00138048.parquet`. It
+- **The baseline** (`baseline.py`) imports the 263 Jun 26 chunks with 6-digit
+  prefixes (10.77M alerts) into an empty `working/` with hats-import. They are
+  picked by name: all of them sort before every later chunk, up to
+  `170587__00100000-00138048.parquet`. The 84 chunks with 5-digit prefixes
+  (`17005__*`, `17006__*`) are skipped, and the replay must skip them too:
+  the raw archive filed those alerts twice, so every one is also in a 6-digit
+  chunk. It
   refuses to run if `working/` or the ingested log already exists, and it
   stops on any format change. The import is logged as one run in
   `ingested.jsonl`, so the replay skips its chunks. The catalog is named
   `rubin_alert_archive` and has the frozen catalog's default columns.
-  Partitions target 1 GiB in memory (hats-import's `byte_pixel_threshold`),
-  about 8x the frozen catalog's, leaving room for nightly growth.
+  Partitions hold at most 200k rows (hats-import's `pixel_threshold`). The
+  frozen catalog's largest partition is just under that, so it was probably
+  built the same way. A 1 GiB `byte_pixel_threshold` was tried first, but
+  hats-import's in-memory size estimate is large for these alerts, so it made
+  1,417 partitions of about 8k rows.
   It's run once as a Slurm job, `scripts/baseline.sbatch` (usage in its header).
 - **File naming follows ppdb_hats.** Each pixel is a leaf directory. Its
   consolidated file, written by the baseline and later by each weekly
@@ -292,7 +299,7 @@ and nothing runs on a schedule until PR 9.
 | 3 | **Schema** | `schema.py`: 1101 target columns, casting, `schemaId` mock, unknown-format detection | small |
 | 4 | **State + notify** | `state.py` (ingested log, format-change flag, lock), `notify.py` (email) | small |
 | 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
-| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/`, logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
+| 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` (skipping the 5-digit duplicates; 200k-row partitions), logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
 | 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
