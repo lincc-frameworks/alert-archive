@@ -248,6 +248,42 @@ def test_write_partitions_casts_nullability(base_dir):
         assert not pq.read_schema(path).field("id").nullable
 
 
+def test_write_partitions_casts_field_order(base_dir):
+    """New files get the catalog's column order and nested field order, even when the new alerts
+    have the same fields in another order.
+
+    ``Table.cast`` needs the top-level columns in the target's order, which ``select`` provides,
+    but it matches struct fields by name, so it reorders nested fields itself. Both must happen
+    for the new files' footers to match the catalog's ``_metadata``.
+    """
+    struct = pa.struct([("a", pa.float64()), ("b", pa.string())])
+
+    # Make the catalog's schema the reverse of the new alerts' at both levels: the struct column
+    # "s" first with its fields as <b, a>, then the existing columns reversed. write_partitions
+    # only reads the schema from _common_metadata, so the old files don't need an "s".
+    common = paths.get_common_metadata_pointer(base_dir)
+    reversed_struct = pa.struct([struct.field("b"), struct.field("a")])
+    reversed_columns = list(pq.read_schema(common))[::-1]
+    expected = pa.schema([("s", reversed_struct), *reversed_columns])
+    pq.write_metadata(expected, common)
+
+    # The new alerts have "s" last, with its fields as <a, b>.
+    def add_struct(df):
+        values = pa.array([{"a": 1.0, "b": "x"}] * len(df), struct)
+        return df.assign(s=pd.Series(pd.arrays.ArrowExtensionArray(values), index=df.index))
+
+    catalog = make_catalog(1000, 100, (45, 180), seed=1).map_partitions(add_struct)
+    write_partitions(catalog, base_catalog_dir=base_dir, parquet_name="run1.parquet")
+    files = list(base_dir.glob("dataset/**/run1.parquet"))
+    assert files
+    for path in files:
+        # ParquetFile, since pq.read_table would add the Norder/Dir/Npix hive partition columns.
+        table = pq.ParquetFile(path).read()
+        assert table.schema == expected
+        # Values follow their field names, not their old positions.
+        assert table["s"][0].as_py() == {"b": "x", "a": 1.0}
+
+
 def test_update_metadata_mixed_schemas_keeps_counts(base_dir):
     """If the footers can't be combined, the pixels and row counts are already up to date."""
     pixel_dir = base_dir / "dataset" / "Norder=2" / "Dir=0" / "Npix=100"
