@@ -175,7 +175,7 @@ class BaselinePipeline(Pipeline):
                 npix_suffix="/",
                 addl_hats_properties={"hats_cols_default": DEFAULT_COLUMNS},
                 tmp_dir=tmp_dir,
-                resume=import_config.resume,
+                resume=False,  # can't resume: tmp_dir is deleted on exit, and an existing working/ is refused
                 simple_progress_bar=import_config.simple_progress_bar,
             )
             pipeline_with_client(args, client)

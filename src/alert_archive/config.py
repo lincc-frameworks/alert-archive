@@ -98,8 +98,6 @@ class ImportConfig:
         Column name for declination.
     pixel_threshold : int
         Most rows per partition; hats-import splits pixels above it.
-    resume : bool
-        Whether to resume an interrupted import.
     simple_progress_bar : bool
         Use a simplified progress display for non-interactive runs.
     """
@@ -107,7 +105,6 @@ class ImportConfig:
     ra_column: str = "ra"
     dec_column: str = "dec"
     pixel_threshold: int = 200_000  # the frozen catalog's largest partition is just under this
-    resume: bool = False
     simple_progress_bar: bool = True
 
 
