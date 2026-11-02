@@ -12,7 +12,8 @@
 # (*.log is gitignored). It starts with the branch and commit that ran.
 #
 # The baseline refuses to run if working/ exists or state/ingested.jsonl
-# already has runs. To rebuild, delete both first.
+# already has runs. To rebuild, delete both first, and state/lock too if
+# the job was killed (e.g. at its time limit), which leaves it behind.
 #
 # Not preemptable on purpose: a cancelled import leaves a partial working/,
 # which then has to be deleted by hand.
