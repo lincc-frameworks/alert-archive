@@ -10,7 +10,8 @@ and layout:
 - top-level ``ra`` / ``dec`` columns, copied from ``diaSource``;
 - every struct and list-of-struct column as a struct of lists, which
   nested-pandas reads as a nested column;
-- no cutout columns.
+- none of :data:`~alert_archive.schema.EXCLUDED_COLUMNS` (cutouts,
+  ``ssSource``, ``mpc_orbits``), which aren't even read.
 """
 
 import pyarrow as pa
@@ -18,16 +19,13 @@ import pyarrow.compute as pc
 from hats.io import file_io
 from hats_import.catalog.file_readers import ParquetPyarrowReader
 
-from .schema import ConformReport, conform_alerts
+from .schema import EXCLUDED_COLUMNS, ConformReport, conform_alerts
 
 COORDINATE_COLUMNS = ("ra", "dec")
 """Top-level coordinate columns added by the reader."""
 
 COORDINATE_SOURCE = "diaSource"
 """Struct column the coordinates are copied from."""
-
-CUTOUT_PREFIX = "cutout"
-"""Columns whose names start with this prefix are dropped."""
 
 DEFAULT_CHUNKSIZE = 5_000
 """Rows per batch. Alerts in busy fields carry long histories: one 50k-row
@@ -118,8 +116,9 @@ class AlertReader(ParquetPyarrowReader):
         if coordinates_only:
             file_columns = [f"{COORDINATE_SOURCE}.{c}" for c in COORDINATE_COLUMNS]
         else:
-            # Converting to the catalog's columns needs the whole alert, so read everything.
-            file_columns = file_io.read_parquet_file(input_file, **self.kwargs).schema_arrow.names
+            # Converting to the catalog's columns needs the whole alert, so read everything it keeps.
+            names = file_io.read_parquet_file(input_file, **self.kwargs).schema_arrow.names
+            file_columns = [c for c in names if c not in EXCLUDED_COLUMNS]
         for table in super().read(input_file, read_columns=file_columns):
             if not coordinates_only:
                 table, report = conform_alerts(table)
@@ -130,7 +129,7 @@ class AlertReader(ParquetPyarrowReader):
 
 
 def transform_alerts(table: pa.Table) -> pa.Table:
-    """Drop cutouts, add coordinates and convert struct columns to nested.
+    """Add coordinates and convert struct columns to nested.
 
     Parameters
     ----------
@@ -142,8 +141,6 @@ def transform_alerts(table: pa.Table) -> pa.Table:
     pyarrow.Table
         Alerts in the catalog's layout.
     """
-    cutouts = [name for name in table.column_names if name.startswith(CUTOUT_PREFIX)]
-    table = table.drop_columns(cutouts)
     table = add_coordinates(table)
     return to_nested(table)
 
