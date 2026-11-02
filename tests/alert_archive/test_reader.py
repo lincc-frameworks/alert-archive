@@ -6,9 +6,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
-from alert_archive.reader import AlertReader, FormatChangeError, transform_alerts
+from alert_archive.reader import AlertReader, FormatChangeError
 from dask.distributed import Client
 from hats_import import ImportArguments, pipeline_with_client
+from hats_import.catalog.file_readers import ParquetPyarrowReader
 
 NESTED_COLUMNS = ["diaSource", "prvDiaSources", "prvDiaForcedSources", "diaObject"]
 
@@ -127,11 +128,23 @@ def test_column_names_with_coordinates(alert_sample_pq_path):
     assert table.column_names == ["ra", "dec", "diaSource"]
 
 
-def test_drops_cutouts(raw_alerts):
-    """Columns starting with "cutout" are removed."""
-    with_cutout = raw_alerts.append_column("cutoutDifference", pa.array([b"x"] * len(raw_alerts)))
-    table = transform_alerts(with_cutout)
-    assert not any(name.startswith("cutout") for name in table.column_names)
+def test_excluded_columns_not_read(alert_sample_pq_path, raw_alerts, tmp_path, monkeypatch):
+    """Excluded columns like cutouts are never read from the file, and the output is
+    the same as for a file without them."""
+    path = tmp_path / "with_cutout.parquet"
+    pq.write_table(raw_alerts.append_column("cutoutDifference", pa.array([b"x"] * len(raw_alerts))), path)
+    requested = []
+    upstream_read = ParquetPyarrowReader.read
+
+    def spy(self, input_file, read_columns=None):
+        requested.extend(read_columns)
+        return upstream_read(self, input_file, read_columns=read_columns)
+
+    monkeypatch.setattr(ParquetPyarrowReader, "read", spy)
+    table = read_all(path)
+
+    assert "cutoutDifference" not in requested
+    assert_tables_equal(table, read_all(alert_sample_pq_path))
 
 
 def test_conforms_to_catalog_columns(alert_sample_pq_path):
