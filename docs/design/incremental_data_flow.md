@@ -125,7 +125,9 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
     Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
     takes it off the log, e.g. to redo runs that wrote bad data after a bug
     fix. The skymaps and metadata still count those files until the next
-    daily run rebuilds them from disk.
+    daily run rebuilds them from disk. The baseline's run is marked
+    `consolidated` (its alerts are in the `Npix=<pixel>.parquet` files), so
+    re-ingesting it is always refused.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
     If a job dies without removing it, nothing breaks it automatically: the
@@ -305,3 +307,14 @@ schedule until step 9.
 | 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
 | 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |
+
+**TODO (step 8, with the merge in lsdb#1536):** the weekly re-import should
+mark each daily run it merges as `consolidated` in the ingested log, e.g. with
+a `PipelineState.mark_consolidated(run_ids)` that rewrites the log atomically
+under the weekly lock. Once merged, a run's alerts are in the
+`Npix=<pixel>.parquet` files like the baseline's, and without the mark only the
+`FileNotFoundError` in `reingest_runs` stops a re-ingest, which
+`missing_files_ok=True` gets past. Mark the runs before the merged catalog
+replaces `working/`, not after: a run marked but not yet merged is only
+refused when it didn't need to be, while one merged but not yet marked can
+be ingested twice. Mark only the runs whose files were in the merge.

@@ -188,6 +188,7 @@ class BaselinePipeline(Pipeline):
                 chunks=[c.name for c in chunks],
                 num_rows=sum(schema_id_counts.values()),
                 schema_id_counts=schema_id_counts,
+                consolidated=True,
             )
             state.append_run(record)
         logger.info("Baseline complete: %d alerts.", record.num_rows)

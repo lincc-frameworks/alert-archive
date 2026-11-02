@@ -90,6 +90,7 @@ def test_baseline_builds_catalog(config, tmp_path):
     assert record.chunks == BASELINE_CHUNKS
     assert record.num_rows == 12
     assert record.schema_id_counts == {1100: 12}
+    assert record.consolidated
     state = PipelineState(config.paths.state_dir)
     assert state.runs() == [record]
     assert state.ingested_chunks() == set(BASELINE_CHUNKS)
