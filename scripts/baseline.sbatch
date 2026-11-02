@@ -11,8 +11,8 @@
 # The log, alert-archive-baseline-<jobid>.log, lands in the repo root
 # (*.log is gitignored). It starts with the branch and commit that ran.
 #
-# The baseline refuses to run if working/ or state/ingested.jsonl already
-# exists. To rebuild, delete both first.
+# The baseline refuses to run if working/ exists or state/ingested.jsonl
+# already has runs. To rebuild, delete both first.
 #
 # Not preemptable on purpose: a cancelled import leaves a partial working/,
 # which then has to be deleted by hand.
