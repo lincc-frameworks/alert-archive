@@ -91,7 +91,7 @@ def write_partitions(catalog, *, base_catalog_dir, parquet_name) -> dict:
     """
     logger.info("Writing partitions...")
     schema = pq.read_schema(paths.get_common_metadata_pointer(base_catalog_dir))
-    check_schema(catalog.meta.to_pyarrow().schema, schema)
+    check_schema(catalog.hc_structure.schema, schema)
 
     try:
         results = catalog.map_partitions(
