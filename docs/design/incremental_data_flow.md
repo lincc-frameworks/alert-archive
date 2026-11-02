@@ -99,7 +99,7 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   (`17005__*`, `17006__*`) are skipped, and the replay must skip them too:
   the raw archive filed those alerts twice, so every one is also in a 6-digit
   chunk. It
-  refuses to run if `working/` or the ingested log already exists, and it
+  refuses to run if `working/` exists or the ingested log already has runs, and it
   stops on any format change. The import is logged as one run in
   `ingested.jsonl`, so the replay skips its chunks. The catalog is named
   `rubin_alert_archive` and has the frozen catalog's default columns.
