@@ -101,6 +101,7 @@ class ReplayPipeline(Pipeline):
             run_tmp = tmp_dir / f"night{len(records)}"
             run_tmp.mkdir()
             record = DailyPipeline(self.config).run(client, run_tmp, email=False)
+            shutil.rmtree(run_tmp)  # keep one night's import on scratch, not all of them
             if record is None:
                 stopped = f"format change at {night[0].name}; see {state.flag_path}"
                 logger.error("Replay stopped: %s", stopped)

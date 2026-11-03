@@ -185,8 +185,10 @@ def check_formats(chunks) -> tuple[dict[str, ConformReport], dict[str, str]]:
     as an empty table, so fields that would be dropped, filled or converted
     are reported just as for the real alerts. Format IDs come from the
     ``schemaId`` column if the chunk has one, else they're inferred from the
-    columns. Values that fail to convert can only be found by reading the
-    alerts, which the import does.
+    columns. Values are only converted when a field's type differs from the
+    catalog's, and any such difference is reported here (as cast), so a
+    chunk that passes can't fail conversion in the import. The reader's
+    :class:`~alert_archive.reader.FormatChangeError` is just a backstop.
 
     Parameters
     ----------
