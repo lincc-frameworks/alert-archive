@@ -9,9 +9,10 @@
 #
 # The log, alert-archive-daily-<jobid>.log, lands in the repo root. The run
 # sends its own summary email, even when there's nothing new.
-# If the job is killed mid-run, it leaves state/lock behind; check that nothing
-# is running, delete the lock, then resubmit. Files from the interrupted run
-# are cleaned up automatically.
+# If the job is killed mid-run (e.g. preempted), it leaves state/lock behind.
+# The next job sees that the lock's Slurm job has ended, takes the lock over
+# and says so in its email; files from the interrupted run are cleaned up
+# automatically. A lock from a run outside Slurm must be deleted by hand.
 # It needs the baseline (scripts/baseline.sbatch) first.
 #
 # Uses the LSST conda env named by ALERT_ARCHIVE_LSST_ENV (default

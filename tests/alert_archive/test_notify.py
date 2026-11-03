@@ -81,3 +81,13 @@ def test_daily_summary_reports_problems():
     assert "diaSource.x" in body
     assert "new.parquet: truncated" in body
     assert "old.parquet (failing since t1): corrupt" in body
+
+
+def test_daily_summary_reports_stale_lock():
+    """A taken-over stale lock marks the run as a problem and names the dead job."""
+    record = RunRecord(run_id="r4", started="t4")
+    holder = {"job": "daily", "since": "t3", "slurm_job_id": "123"}
+    subject, body = daily_summary(record, stale_lock=holder)
+
+    assert subject == f"{PROBLEM_MARK} daily r4: stale lock taken over"
+    assert "Slurm job 123 ended" in body

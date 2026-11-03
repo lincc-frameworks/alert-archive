@@ -113,7 +113,11 @@ class DailyPipeline(Pipeline):
                 state.flag_format_change(run_id, changes)
                 if email:
                     record = RunRecord(run_id=run_id, started=started, skipped=skipped)
-                    send_email(*daily_summary(record, state.failing_chunks(), format_change=changes))
+                    send_email(
+                        *daily_summary(
+                            record, state.failing_chunks(), format_change=changes, stale_lock=state.stale_lock
+                        )
+                    )
                 return None
 
             num_rows = 0
@@ -145,7 +149,7 @@ class DailyPipeline(Pipeline):
 
         logger.info("Run %s complete: %d alerts from %d chunks.", run_id, num_rows, len(chunks))
         if email:
-            send_email(*daily_summary(record, state.failing_chunks()))
+            send_email(*daily_summary(record, state.failing_chunks(), stale_lock=state.stale_lock))
         return record
 
 

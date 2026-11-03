@@ -66,6 +66,7 @@ def daily_summary(
     record: RunRecord,
     failing: dict[str, tuple[str, str]] | None = None,
     format_change: dict | None = None,
+    stale_lock: dict | None = None,
 ) -> tuple[str, str]:
     """Build the summary email for a daily run.
 
@@ -80,6 +81,9 @@ def daily_summary(
     format_change : dict or None
         Details of the format change this run found, as passed to
         :meth:`PipelineState.flag_format_change`, or None if there was none.
+    stale_lock : dict or None
+        Holder of a stale lock the run took over
+        (:attr:`PipelineState.stale_lock`), or None if there was none.
 
     Returns
     -------
@@ -92,6 +96,8 @@ def daily_summary(
         problems.append("FORMAT CHANGE")
     if record.skipped:
         problems.append(f"{len(record.skipped)} chunk(s) skipped")
+    if stale_lock:
+        problems.append("stale lock taken over")
     status = ", ".join(problems) or "OK"
     mark = PROBLEM_MARK if problems else OK_MARK
     subject = f"{mark} daily {record.run_id}: {status}"
@@ -114,6 +120,16 @@ def daily_summary(
             "  Nothing was ingested. The flag is set; daily runs and Saturday's re-import",
             "  stop until it's cleared. Add the format, then clear the flag.",
             *(f"  {k}: {v}" for k, v in format_change.items()),
+        ]
+
+    if stale_lock:
+        lines += [
+            "",
+            "STALE LOCK",
+            f"  Slurm job {stale_lock.get('slurm_job_id')} ended without releasing the lock",
+            f"  (held since {stale_lock.get('since')} by the {stale_lock.get('job')} job);"
+            " this run took it over.",
+            "  Check that job's log. Any files it wrote were removed as orphans and its chunks retried.",
         ]
 
     if record.skipped:

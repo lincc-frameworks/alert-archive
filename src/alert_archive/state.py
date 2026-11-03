@@ -8,14 +8,18 @@ outside the catalog, so it survives the weekly re-import:
   always rewritten atomically, so a crash never leaves a partial line.
 - ``format_change.json``: present only while flagged. Its existence is the flag.
 - ``lock``: held while a daily or weekly job runs, so they never overlap.
+  A lock left by a Slurm job that has ended (e.g. preempted) is taken over.
 
 Nothing here catches errors or sends email; the jobs decide what to do.
 """
 
+import contextlib
 import json
+import logging
 import operator
 import os
 import socket
+import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -33,6 +37,23 @@ LOCK_FILE = "lock"
 
 UNKNOWN_SCHEMA_ID = "unknown"
 """JSON key for alerts whose format ID is unknown (None in Python)."""
+
+SLURM_ENDED_STATES = frozenset(
+    {
+        "BOOT_FAIL",
+        "CANCELLED",
+        "COMPLETED",
+        "DEADLINE",
+        "FAILED",
+        "NODE_FAIL",
+        "OUT_OF_MEMORY",
+        "PREEMPTED",
+        "TIMEOUT",
+    }
+)
+"""Slurm job states (as ``squeue -o %T`` prints them) meaning the job's processes are gone."""
+
+logger = logging.getLogger(__name__)
 
 
 class LockHeldError(RuntimeError):
@@ -133,6 +154,8 @@ class PipelineState:
     def __init__(self, root):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self.stale_lock: dict | None = None
+        """Holder of a stale lock that :meth:`lock` took over, if it did."""
 
     @property
     def log_path(self) -> Path:
@@ -375,9 +398,19 @@ class PipelineState:
     def lock(self, job: str) -> Generator[None]:
         """Hold the pipeline lock while the ``with`` block runs.
 
-        The lock file records who holds it. It is removed on exit, also when
-        the block raises. If a job dies without removing it, the next job
-        fails with :class:`LockHeldError` until a person checks and deletes it.
+        The lock file records who holds it, including the Slurm job ID if
+        there is one. It is removed when the job finishes, even if the job fails
+        with an error.
+
+        A job killed outright (preempted, out of memory, past its time limit)
+        can't remove it. If the holder's Slurm job has ended, the lock is
+        stale: it is taken over, with a warning, and :attr:`stale_lock` is set
+        to the old holder so the job can report it. This is safe because a
+        crash at any point leaves state the next run recovers from (the log is
+        written atomically, orphan files are removed, metadata is rebuilt from
+        disk). A lock with no Slurm job ID (e.g. from a login node), or whose
+        job can't be checked, is never taken over; the next job fails with
+        :class:`LockHeldError` until a person checks and deletes it.
 
         Parameters
         ----------
@@ -394,14 +427,9 @@ class PipelineState:
             "host": socket.gethostname(),
             "pid": os.getpid(),
             "since": datetime.now(UTC).isoformat(),
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         }
-        try:
-            fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            raise LockHeldError(
-                f"{self.lock_path} is held by {self.lock_path.read_text().strip()}. "
-                "If that job is no longer running, delete the file."
-            ) from None
+        fd = self._create_lock()
         try:
             # Inside the try, so a failed write (e.g. disk full) doesn't leave an empty lock behind.
             with os.fdopen(fd, "w") as f:
@@ -409,6 +437,81 @@ class PipelineState:
             yield
         finally:
             self.lock_path.unlink(missing_ok=True)
+
+    def _create_lock(self) -> int:
+        """Create the lock file, taking over a stale one; return its descriptor."""
+        try:
+            return os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            pass
+        try:
+            text = self.lock_path.read_text()
+        except FileNotFoundError:
+            text = None  # released just now; try again below
+        if text is not None and not self._remove_stale_lock(text):
+            raise LockHeldError(
+                f"{self.lock_path} is held by {text.strip()}. "
+                "If that job is no longer running, delete the file."
+            )
+        try:
+            return os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise LockHeldError(f"{self.lock_path} was just taken by another job.") from None
+
+    def _remove_stale_lock(self, text: str) -> bool:
+        """Remove the lock if its holder's Slurm job has ended. Return whether it was removed.
+
+        ``text`` is the lock's contents as read. The lock is first moved aside
+        and compared with ``text``, so that if another job took over the
+        stale lock first, its new lock is put back rather than removed.
+        """
+        try:
+            holder = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        job_id = holder.get("slurm_job_id") if isinstance(holder, dict) else None
+        if not job_id or slurm_job_running(job_id) is not False:
+            return False
+
+        aside = self.lock_path.with_name(f".{LOCK_FILE}.stale.{os.getpid()}")
+        try:
+            os.rename(self.lock_path, aside)
+        except FileNotFoundError:
+            return True  # already gone; the caller tries to create it
+        if aside.read_text() != text:
+            with contextlib.suppress(FileExistsError):  # put it back, unless a newer lock is there
+                os.link(aside, self.lock_path)
+            aside.unlink()
+            return False
+        aside.unlink()
+        logger.warning("Took over a stale lock from Slurm job %s, which has ended: %s", job_id, text.strip())
+        self.stale_lock = holder
+        return True
+
+
+def slurm_job_running(job_id) -> bool | None:
+    """Whether a Slurm job is still running (or pending).
+
+    Returns
+    -------
+    bool or None
+        False if Slurm says the job has ended, or no longer knows it (Slurm
+        forgets ended jobs after a while). True if it is in any other state.
+        None if Slurm couldn't be asked, e.g. ``squeue`` isn't installed.
+    """
+    try:
+        result = subprocess.run(
+            ["squeue", "--noheader", "--jobs", str(job_id), "--format", "%T"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return False if "Invalid job id" in result.stderr else None
+    states = set(result.stdout.split())
+    return bool(states - SLURM_ENDED_STATES)
 
 
 def _write_atomic(path: Path, text: str):

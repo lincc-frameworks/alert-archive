@@ -1,9 +1,12 @@
 import json
+import os
+import subprocess
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-from alert_archive.state import LockHeldError, PipelineState, RunRecord, new_run_id
+from alert_archive import state as state_module
+from alert_archive.state import LockHeldError, PipelineState, RunRecord, new_run_id, slurm_job_running
 
 
 def make_run(run_id, chunks=(), skipped=None, **kwargs):
@@ -255,3 +258,105 @@ def test_lock_failed_write_leaves_no_lock(tmp_path, monkeypatch):
         with state.lock("daily"):
             pass
     assert not state.lock_path.exists()
+
+
+def write_lock(state, slurm_job_id):
+    """Leave a lock behind, as a job killed while holding it would."""
+    holder = {"job": "daily", "host": "h", "pid": 1, "since": "t0", "slurm_job_id": slurm_job_id}
+    state.lock_path.write_text(json.dumps(holder))
+    return holder
+
+
+@pytest.fixture
+def squeue(monkeypatch):
+    """Fake whether Slurm jobs are running: set ``squeue.running[job_id]`` to True, False or None."""
+
+    def fake(job_id):
+        return fake.running.get(job_id)
+
+    fake.running = {}
+    monkeypatch.setattr(state_module, "slurm_job_running", fake)
+    return fake
+
+
+def test_lock_takes_over_lock_of_ended_job(tmp_path, squeue, monkeypatch):
+    """A lock whose Slurm job has ended is taken over, and the old holder is recorded."""
+    monkeypatch.setenv("SLURM_JOB_ID", "200")
+    state = PipelineState(tmp_path)
+    holder = write_lock(state, "100")
+    squeue.running["100"] = False
+    with state.lock("daily"):
+        assert json.loads(state.lock_path.read_text())["slurm_job_id"] == "200"
+    assert state.stale_lock == holder
+    assert not state.lock_path.exists()
+    assert list(tmp_path.iterdir()) == []  # nothing left aside
+
+
+@pytest.mark.parametrize("running", [True, None])
+def test_lock_keeps_lock_of_running_or_unknown_job(tmp_path, squeue, running):
+    """A lock whose job is running, or can't be checked, still blocks the next job."""
+    state = PipelineState(tmp_path)
+    write_lock(state, "100")
+    squeue.running["100"] = running
+    with pytest.raises(LockHeldError, match="100"):
+        with state.lock("daily"):
+            pass
+    assert state.lock_path.exists()
+    assert state.stale_lock is None
+
+
+def test_lock_keeps_lock_without_slurm_job(tmp_path, squeue):
+    """A lock from outside Slurm is never taken over, since its job can't be checked."""
+    state = PipelineState(tmp_path)
+    write_lock(state, None)
+    with pytest.raises(LockHeldError):
+        with state.lock("daily"):
+            pass
+    assert state.lock_path.exists()
+
+
+def test_lock_keeps_newer_lock_after_race(tmp_path, squeue, monkeypatch):
+    """If another job took over the stale lock first, its new lock is put back, not removed."""
+    state = PipelineState(tmp_path)
+    write_lock(state, "100")
+    squeue.running["100"] = False
+    real_rename = os.rename
+
+    def rename_after_other_job(src, dst):
+        write_lock(state, "300")  # the other job took over between our read and our rename
+        real_rename(src, dst)
+
+    monkeypatch.setattr(state_module.os, "rename", rename_after_other_job)
+    with pytest.raises(LockHeldError):
+        with state.lock("daily"):
+            pass
+    assert json.loads(state.lock_path.read_text())["slurm_job_id"] == "300"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["lock"]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "expected"),
+    [
+        (0, "RUNNING\n", "", True),
+        (0, "PENDING\n", "", True),
+        (0, "PREEMPTED\n", "", False),
+        (0, "", "", False),
+        (1, "", "slurm_load_jobs error: Invalid job id specified", False),
+        (1, "", "slurm_load_jobs error: Unable to contact slurm controller", None),
+    ],
+)
+def test_slurm_job_running(monkeypatch, returncode, stdout, stderr, expected):
+    """squeue's answer is read as running, ended (incl. forgotten), or unknown."""
+    result = subprocess.CompletedProcess([], returncode, stdout, stderr)
+    monkeypatch.setattr(state_module.subprocess, "run", lambda *a, **k: result)
+    assert slurm_job_running("100") is expected
+
+
+def test_slurm_job_running_without_squeue(monkeypatch):
+    """No squeue (not on a Slurm host) means the job can't be checked."""
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("squeue")
+
+    monkeypatch.setattr(state_module.subprocess, "run", missing)
+    assert slurm_job_running("100") is None
