@@ -1,11 +1,12 @@
 #!/bin/bash
 # Convert the raw-archive subdirectories that are new since the last run:
 #
-#   sbatch scripts/convert.sbatch [out-dir]
+#   sbatch scripts/convert_from_avro.sbatch [out-dir]
 #
 #SBATCH --job-name=convert-from-avro
 #SBATCH --account=rubin:default
 #SBATCH --partition=milano
+#SBATCH --qos=preemptable
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=01:00:00

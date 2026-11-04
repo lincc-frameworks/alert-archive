@@ -3,7 +3,7 @@
 Slurm jobs for running the pipeline on S3DF. The code they run lives in the
 `alert_archive` package.
 
-- `convert.sbatch`: converts the new raw alerts to parquet, nightly.
+- `convert_from_avro.sbatch`: converts the new raw alerts to parquet, nightly.
 
 ## Converting the raw alerts
 
@@ -39,14 +39,15 @@ pip install -e <checkout>
 ```
 
 This adds the `alert-archive` command. `python -m alert_archive` is the same
-command; the job uses it, so it doesn't depend on `PATH`. In `convert.sbatch`,
-check the `--output` (log file) and `--mail-user` lines.
+command; the job uses it, so it doesn't depend on `PATH`. In
+`convert_from_avro.sbatch`, check the `--output` (log file) and `--mail-user`
+lines.
 
 ## Running it
 
 ```bash
-sbatch scripts/convert.sbatch                        # nightly, into landing/
-alert-archive convert-from-avro --out-dir <dir>      # or by hand
+sbatch scripts/convert_from_avro.sbatch             # nightly, into landing/
+alert-archive convert-from-avro --out-dir <dir>     # or by hand
 ```
 
 If a chunk fails, the job exits with 1, so Slurm emails. If the job fails or
@@ -55,9 +56,9 @@ conversions into the same directory at once.
 
 **Full reconversion** (e.g. to get `schemaId` and the 1101 fields for the
 alerts the original script converted): run the job into a new directory,
-`sbatch scripts/convert.sbatch <new-dir>`, again and again until its log says
-`0 new subdirectories`, then make that directory the job's default. Old alerts
-are slow to read (see below), so this can take days.
+`sbatch scripts/convert_from_avro.sbatch <new-dir>`, again and again until
+its log says `0 new subdirectories`, then make that directory the job's
+default. Older alerts might be slow to read (see below).
 
 ## When something fails
 

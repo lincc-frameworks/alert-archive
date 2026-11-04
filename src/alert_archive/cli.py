@@ -2,7 +2,7 @@
 
 Subcommands:
 
-- ``convert-from-avro``: :mod:`alert_archive.convert`.
+- ``convert-from-avro``: :mod:`alert_archive.convert_from_avro`.
 """
 
 import argparse
@@ -10,7 +10,7 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from alert_archive import convert
+from alert_archive import convert_from_avro
 
 logger = logging.getLogger(__name__)
 
@@ -55,27 +55,27 @@ def _parser() -> argparse.ArgumentParser:
     convert_cmd.add_argument(
         "--archive-dir",
         type=Path,
-        default=convert.ARCHIVE_DIR,
-        help=f"default: {convert.ARCHIVE_DIR}",
+        default=convert_from_avro.ARCHIVE_DIR,
+        help=f"default: {convert_from_avro.ARCHIVE_DIR}",
     )
     convert_cmd.add_argument(
         "--threads",
         type=int,
-        default=convert.THREADS,
-        help=f"default: {convert.THREADS}",
+        default=convert_from_avro.THREADS,
+        help=f"default: {convert_from_avro.THREADS}",
     )
     convert_cmd.add_argument(
         "--chunk-size",
         type=int,
-        default=convert.CHUNK_SIZE,
-        help=f"alerts per chunk, for a new output directory; default: {convert.CHUNK_SIZE}",
+        default=convert_from_avro.CHUNK_SIZE,
+        help=f"alerts per chunk, for a new output directory; default: {convert_from_avro.CHUNK_SIZE}",
     )
     return parser
 
 
 def _convert(args) -> int:
     """Convert the new archive subdirectories. Returns 1 if a chunk failed."""
-    results = convert.update(args.out_dir, args.archive_dir, args.threads, args.chunk_size)
+    results = convert_from_avro.update(args.out_dir, args.archive_dir, args.threads, args.chunk_size)
     counts = Counter(r.status for r in results)
     logger.info(
         "done: %d written, %d already converted, %d failed",

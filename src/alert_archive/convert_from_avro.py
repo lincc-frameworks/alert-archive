@@ -89,6 +89,8 @@ def update(
     ------
     ValueError
         If the manifest is for a different archive.
+    FileNotFoundError
+        If the archive isn't there.
     """
     out_dir = Path(out_dir)
     manifest = read_manifest(out_dir) or {
@@ -99,6 +101,8 @@ def update(
     }
     if Path(manifest["archive"]) != Path(archive_dir):
         raise ValueError(f"{out_dir} is for archive {manifest['archive']}, not {archive_dir}")
+    if not Path(archive_dir).is_dir():  # e.g. not mounted: fail rather than find nothing new
+        raise FileNotFoundError(f"archive {archive_dir} not found")
     converted = {s["subdir"] for s in manifest["subdirs"]}
     new = [d for d in list_subdirs(archive_dir) if d.name not in converted]
     logger.info("%d new subdirectories", len(new))
@@ -241,7 +245,10 @@ def convert_chunk(paths, out_path, threads: int = THREADS) -> ChunkResult:
     table = pa.Table.from_pylist(decoded, schema=target_schema())
     tmp = out_path.with_name(f".{out_path.name}.{os.getpid()}.tmp")
     try:
-        pq.write_table(table, tmp)
+        with open(tmp, "wb") as f:
+            pq.write_table(table, f)
+            f.flush()
+            os.fsync(f.fileno())  # on disk before the rename, so a crash can't leave a partial chunk
         os.replace(tmp, out_path)
     finally:
         tmp.unlink(missing_ok=True)
