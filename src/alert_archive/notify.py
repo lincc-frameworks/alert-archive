@@ -21,6 +21,9 @@ OK_MARK = "\N{WHITE HEAVY CHECK MARK}"
 PROBLEM_MARK = "\N{CROSS MARK}"
 """Start of the subject when a run had a format change or skipped chunks (a red x)."""
 
+WARNING_MARK = "\N{WARNING SIGN}\N{VARIATION SELECTOR-16}"
+"""Start of the subject when a run went fine but took over a stale lock (a warning sign)."""
+
 
 def send_email(subject: str, body: str, recipients=DEFAULT_RECIPIENTS, mail_command: str = "mail"):
     """Send an email with the ``mail`` command.
@@ -96,10 +99,9 @@ def daily_summary(
         problems.append("FORMAT CHANGE")
     if record.skipped:
         problems.append(f"{len(record.skipped)} chunk(s) skipped")
-    if stale_lock:
-        problems.append("stale lock taken over")
-    status = ", ".join(problems) or "OK"
-    mark = PROBLEM_MARK if problems else OK_MARK
+    warnings = ["stale lock taken over"] if stale_lock else []
+    status = ", ".join(problems + warnings) or "OK"
+    mark = PROBLEM_MARK if problems else WARNING_MARK if warnings else OK_MARK
     subject = f"{mark} daily {record.run_id}: {status}"
 
     # Format IDs in numeric order, unknown (None) last.

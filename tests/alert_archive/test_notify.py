@@ -1,7 +1,14 @@
 import subprocess
 
 import pytest
-from alert_archive.notify import OK_MARK, PROBLEM_MARK, SUBJECT_PREFIX, daily_summary, send_email
+from alert_archive.notify import (
+    OK_MARK,
+    PROBLEM_MARK,
+    SUBJECT_PREFIX,
+    WARNING_MARK,
+    daily_summary,
+    send_email,
+)
 from alert_archive.state import RunRecord
 
 
@@ -84,10 +91,19 @@ def test_daily_summary_reports_problems():
 
 
 def test_daily_summary_reports_stale_lock():
-    """A taken-over stale lock marks the run as a problem and names the dead job."""
+    """A taken-over stale lock is a warning, not a problem, and names the dead job."""
     record = RunRecord(run_id="r4", started="t4")
     holder = {"job": "daily", "since": "t3", "slurm_job_id": "123"}
     subject, body = daily_summary(record, stale_lock=holder)
 
-    assert subject == f"{PROBLEM_MARK} daily r4: stale lock taken over"
+    assert subject == f"{WARNING_MARK} daily r4: stale lock taken over"
     assert "Slurm job 123 ended" in body
+
+
+def test_daily_summary_problem_mark_wins_over_stale_lock():
+    """A run with a real problem gets the problem mark even if it also took over a lock."""
+    record = RunRecord(run_id="r5", started="t5", skipped={"bad.parquet": "truncated"})
+    holder = {"job": "daily", "since": "t4", "slurm_job_id": "123"}
+    subject, _ = daily_summary(record, stale_lock=holder)
+
+    assert subject == f"{PROBLEM_MARK} daily r5: 1 chunk(s) skipped, stale lock taken over"
