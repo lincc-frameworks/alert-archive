@@ -25,7 +25,6 @@ Home <self>
 catalog/access
 catalog/schema
 catalog/data_quirks
-catalog/examples
 ```
 
 ```{toctree}
