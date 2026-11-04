@@ -10,12 +10,7 @@ import lsdb
 alerts = lsdb.open_catalog("http://slac.data.lsdb.io:10942/lsdb/rubin_alert_archive/")
 ```
 
-This site has two halves:
-
-- **Using the catalog** is for scientists: how to open it, what's in it, and
-  what to watch out for.
-- **Maintaining the pipeline** is for whoever runs the archive: how the catalog
-  is built and updated, and what to do when something goes wrong.
+If you want to use the alerts, start with Using the catalog. If you're running or changing the pipeline, see Maintaining the pipeline.
 
 ```{toctree}
 :hidden:
