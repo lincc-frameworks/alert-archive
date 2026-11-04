@@ -75,8 +75,8 @@ class ReplayPipeline(Pipeline):
         max_nights : int or None
             Stop after this many daily runs. None replays everything.
         email : bool
-            Whether to send one summary email at the end. The daily runs
-            themselves never email.
+            Whether to send one summary email at the end, also if the replay
+            fails partway. The daily runs themselves never email.
         after : str
             Name of the last baseline chunk; see :func:`replay_nights`.
 
@@ -84,29 +84,47 @@ class ReplayPipeline(Pipeline):
         -------
         list[RunRecord]
             The daily runs, in order. Ends early if a run found a format change.
+
+        Raises
+        ------
+        Exception
+            Whatever a daily run raises (e.g.
+            :class:`~alert_archive.state.LockHeldError`), after the summary
+            email of the nights that finished is sent.
         """
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
         paths.landing_dir.mkdir(parents=True, exist_ok=True)
 
-        records, stopped = [], None
-        for night in replay_nights(paths.dump_dir, after):
-            if max_nights is not None and len(records) >= max_nights:
-                break
-            ingested = state.ingested_chunks()
-            if all(c.name in ingested for c in night):
-                continue
-            for chunk in night:
-                _copy_into(chunk, paths.landing_dir)
-            run_tmp = tmp_dir / f"night{len(records)}"
-            run_tmp.mkdir()
-            record = DailyPipeline(self.config).run(client, run_tmp, email=False)
-            shutil.rmtree(run_tmp)  # keep one night's import on scratch, not all of them
-            if record is None:
-                stopped = f"format change at {night[0].name}; see {state.flag_path}"
-                logger.error("Replay stopped: %s", stopped)
-                break
-            records.append(record)
+        records, stopped, night = [], None, None
+        try:
+            for night in replay_nights(paths.dump_dir, after):
+                if max_nights is not None and len(records) >= max_nights:
+                    break
+                ingested = state.ingested_chunks()
+                if all(c.name in ingested for c in night):
+                    continue
+                for chunk in night:
+                    _copy_into(chunk, paths.landing_dir)
+                run_tmp = tmp_dir / f"night{len(records)}"
+                run_tmp.mkdir()
+                record = DailyPipeline(self.config).run(client, run_tmp, email=False)
+                shutil.rmtree(run_tmp)  # keep one night's import on scratch, not all of them
+                if record is None:
+                    stopped = f"format change at {night[0].name}; see {state.flag_path}"
+                    logger.error("Replay stopped: %s", stopped)
+                    break
+                records.append(record)
+        except Exception as exc:
+            # Still report the nights that finished: the daily runs send no email of their own.
+            where = f" on prefix {night[0].name.split('__')[0]}" if night else ""
+            stopped = f"{type(exc).__name__}{where}: {exc}"
+            if email:
+                try:
+                    send_email(*replay_summary(records, stopped))
+                except Exception:  # noqa: BLE001 - don't hide the original error
+                    logger.exception("Couldn't send the replay email")
+            raise
 
         if email:
             send_email(*replay_summary(records, stopped))

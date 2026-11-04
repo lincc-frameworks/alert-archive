@@ -97,6 +97,26 @@ def test_replay_stops_on_format_change(v2_config, dump, tmp_path, emails):
     assert "STOPPED" in emails[0][0]
 
 
+def test_replay_emails_finished_nights_on_error(v2_config, dump, tmp_path, emails, monkeypatch):
+    """If a night raises, the email still reports the nights that finished, and the error propagates."""
+    real_run = replay.DailyPipeline.run
+    calls = []
+
+    def fail_second_night(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("boom")
+        return real_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(replay.DailyPipeline, "run", fail_second_night)
+    with pytest.raises(RuntimeError, match="boom"):
+        run_replay(v2_config, tmp_path)
+
+    ((subject, body),) = emails
+    assert "1 run(s), 4 alerts, STOPPED" in subject
+    assert "RuntimeError on prefix 313637: boom" in body
+
+
 def test_replay_summary_lists_skipped():
     """Skipped chunks from any run are listed in the summary."""
     record = RunRecord("20261101T000000Z", "t", chunks=["a"], num_rows=3, skipped={"b": "OSError: bad"})
