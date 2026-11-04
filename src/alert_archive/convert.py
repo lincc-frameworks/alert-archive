@@ -31,6 +31,7 @@ from alert_archive.schema import (
     known_schema_ids,
     target_schema,
 )
+from alert_archive.state import write_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +152,7 @@ def _alert_files(out_dir: Path, subdir: Path) -> list[str]:
         names = [os.path.basename(p) for p in list_alerts(subdir)]
         if names:
             saved.parent.mkdir(exist_ok=True)
-            _write_atomically(saved, "".join(f"{name}\n" for name in names))
+            write_atomic(saved, "".join(f"{name}\n" for name in names))
     return [os.path.join(subdir, name) for name in names]
 
 
@@ -187,14 +188,7 @@ def _save_manifest(out_dir: Path, manifest: dict):
         "subdirs": manifest["subdirs"],
         "chunks": manifest["chunks"],
     }
-    _write_atomically(out_dir / MANIFEST_NAME, json.dumps(content))
-
-
-def _write_atomically(path: Path, text: str):
-    """Write a file under a temporary name, then rename it, so it's never partly written."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text)
-    os.replace(tmp, path)
+    write_atomic(out_dir / MANIFEST_NAME, json.dumps(content))
 
 
 @dataclass
@@ -247,7 +241,7 @@ def convert_chunk(paths, out_path, threads: int = THREADS) -> ChunkResult:
     table = pa.Table.from_pylist(decoded, schema=target_schema())
     tmp = out_path.with_name(f".{out_path.name}.{os.getpid()}.tmp")
     try:
-        pq.write_table(table, tmp, compression="zstd", row_group_size=65_536)
+        pq.write_table(table, tmp)
         os.replace(tmp, out_path)
     finally:
         tmp.unlink(missing_ok=True)

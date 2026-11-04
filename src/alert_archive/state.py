@@ -169,7 +169,7 @@ class PipelineState:
         runs = self.runs()
         if any(r.run_id == record.run_id for r in runs):
             raise ValueError(f"run {record.run_id!r} is already in {self.log_path}")
-        _write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in [*runs, record]))
+        write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in [*runs, record]))
 
     def reingest_runs(self, catalog_dir, run_ids, missing_files_ok: bool = False) -> list[RunRecord]:
         """Delete the catalog files that runs wrote and take the runs off the log.
@@ -267,7 +267,7 @@ class PipelineState:
         removed = self._find_runs(run_ids)
         removed_ids = {r.run_id for r in removed}
         kept = [r for r in self.runs() if r.run_id not in removed_ids]
-        _write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
+        write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
         return removed
 
     def _find_runs(self, run_ids) -> list[RunRecord]:
@@ -346,7 +346,7 @@ class PipelineState:
         now = (now or datetime.now(UTC)).isoformat()
         flag = self.format_change() or {"flagged_at": now, "runs": []}
         flag["runs"].append({"run_id": run_id, "time": now, "details": details})
-        _write_atomic(self.flag_path, json.dumps(flag, indent=2) + "\n")
+        write_atomic(self.flag_path, json.dumps(flag, indent=2) + "\n")
 
     def clear_format_change(self):
         """Clear the format-change flag. Does nothing if it isn't set."""
@@ -394,7 +394,7 @@ class PipelineState:
             self.lock_path.unlink(missing_ok=True)
 
 
-def _write_atomic(path: Path, text: str):
+def write_atomic(path: Path, text: str):
     """Replace a file's contents so readers see either the old or the new version."""
     tmp = path.with_name(f".{path.name}.tmp")
     with open(tmp, "w") as f:
