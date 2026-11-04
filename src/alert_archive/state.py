@@ -55,10 +55,17 @@ class RunRecord:
     """Number of alerts per format ID. None means the format is unknown."""
     skipped: dict[str, str] = field(default_factory=dict)
     """Input chunks that failed, with their error. They aren't ingested, so the next run retries them."""
+    consolidated: bool = False
+    """True if the run's alerts are in consolidated ``Npix=<pixel>.parquet`` files
+    rather than files of its own, as for the baseline (see :mod:`alert_archive.baseline`).
+    Such a run can't be re-ingested: :meth:`PipelineState.reingest_runs` refuses it."""
 
     @property
     def file_name(self) -> str | None:
-        """Name of the parquet file this run wrote in each pixel, or None if it wrote nothing."""
+        """Name of the parquet file this run wrote in each pixel, or None if it wrote nothing.
+
+        A :attr:`consolidated` run is the exception: no file has this name.
+        """
         return f"{self.run_id}.parquet" if self.num_rows else None
 
     def __post_init__(self):
@@ -215,6 +222,10 @@ class PipelineState:
         ------
         KeyError
             If any of the IDs isn't in the log. Nothing is deleted or removed then.
+        ValueError
+            If any of the runs is :attr:`~RunRecord.consolidated`, even with
+            ``missing_files_ok``. Its alerts can't be deleted separately, so
+            re-ingesting would add them a second time. Nothing is deleted or removed then.
         FileNotFoundError
             If a run that wrote files has none left in the catalog, most
             likely because the weekly re-import merged them, and
@@ -225,6 +236,12 @@ class PipelineState:
         catalog_dir = Path(catalog_dir)
         with self.lock("reingest"):
             runs = self._find_runs(run_ids)
+            consolidated = [r.run_id for r in runs if r.consolidated]
+            if consolidated:
+                raise ValueError(
+                    f"runs {consolidated} are consolidated into Npix=*.parquet files, so their "
+                    "alerts can't be deleted separately and re-ingesting would add them a second time"
+                )
             files = {
                 r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name
             }

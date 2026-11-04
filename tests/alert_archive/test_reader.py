@@ -4,10 +4,12 @@ import lsdb
 import nested_pandas as npd
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import pytest
-from alert_archive.reader import AlertReader, transform_alerts
+from alert_archive.reader import AlertReader, FormatChangeError
 from dask.distributed import Client
 from hats_import import ImportArguments, pipeline_with_client
+from hats_import.catalog.file_readers import ParquetPyarrowReader
 
 NESTED_COLUMNS = ["diaSource", "prvDiaSources", "prvDiaForcedSources", "diaObject"]
 
@@ -126,11 +128,46 @@ def test_column_names_with_coordinates(alert_sample_pq_path):
     assert table.column_names == ["ra", "dec", "diaSource"]
 
 
-def test_drops_cutouts(raw_alerts):
-    """Columns starting with "cutout" are removed."""
-    with_cutout = raw_alerts.append_column("cutoutDifference", pa.array([b"x"] * len(raw_alerts)))
-    table = transform_alerts(with_cutout)
-    assert not any(name.startswith("cutout") for name in table.column_names)
+def test_excluded_columns_not_read(alert_sample_pq_path, raw_alerts, tmp_path, monkeypatch):
+    """Excluded columns like cutouts are never read from the file, and the output is
+    the same as for a file without them."""
+    path = tmp_path / "with_cutout.parquet"
+    pq.write_table(raw_alerts.append_column("cutoutDifference", pa.array([b"x"] * len(raw_alerts))), path)
+    requested = []
+    upstream_read = ParquetPyarrowReader.read
+
+    def spy(self, input_file, read_columns=None):
+        requested.extend(read_columns)
+        return upstream_read(self, input_file, read_columns=read_columns)
+
+    monkeypatch.setattr(ParquetPyarrowReader, "read", spy)
+    table = read_all(path)
+
+    assert "cutoutDifference" not in requested
+    assert_tables_equal(table, read_all(alert_sample_pq_path))
+
+
+def test_conforms_to_catalog_columns(alert_sample_pq_path):
+    """Alerts get the 1101 fields (null for these 1100 alerts) and a schemaId column."""
+    conformed = pa.concat_tables(AlertReader().read(alert_sample_pq_path))
+    assert pc.unique(conformed["schemaId"]).to_pylist() == [1100]
+    exposure_time = pc.list_flatten(pc.struct_field(conformed["diaSource"], "exposureTime"))
+    assert exposure_time.null_count == len(exposure_time) == len(conformed)
+
+
+def test_coordinates_only_skip_conforming(alert_sample_pq_path):
+    """Reading only ra/dec, as hats-import's mapping pass does, reads just those (no schemaId)."""
+    table = pa.concat_tables(AlertReader().read(alert_sample_pq_path, read_columns=["ra", "dec"]))
+    assert table.column_names == ["ra", "dec"]
+
+
+def test_raises_on_format_change(tmp_path, raw_alerts):
+    """A field the catalog doesn't have stops the read, naming the file."""
+    path = tmp_path / "changed.parquet"
+    pq.write_table(raw_alerts.append_column("newField", pa.array([1.0] * len(raw_alerts))), path)
+    with pytest.raises(FormatChangeError, match="changed.parquet") as excinfo:
+        list(AlertReader().read(path))
+    assert excinfo.value.report.dropped == ["newField"]
 
 
 def test_hats_import(alert_sample_pq_path, tmp_path):

@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 import numpy as np
@@ -143,6 +144,30 @@ def test_reingest_missing_files_ok(tmp_path):
     removed = state.reingest_runs(tmp_path / "catalog", ["r1"], missing_files_ok=True)
     assert [r.run_id for r in removed] == ["r1"]
     assert state.runs() == []
+
+
+def test_reingest_refuses_consolidated_runs(tmp_path):
+    """A consolidated run (the baseline) is refused even with missing_files_ok, since its
+    alerts would stay in the catalog, so other runs listed with it are untouched too."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    consolidated = write_catalog_files(catalog, "Npix=10.parquet", [(1, 10)])
+    r2_files = write_catalog_files(catalog, "r2.parquet", [(1, 10)])
+    state.append_run(make_run("r1", ["a"], num_rows=1, consolidated=True))
+    state.append_run(make_written_run("r2", ["b"]))
+
+    with pytest.raises(ValueError, match="r1"):
+        state.reingest_runs(catalog, ["r1", "r2"], missing_files_ok=True)
+
+    assert all(p.exists() for p in consolidated + r2_files)
+    assert state.ingested_chunks() == {"a", "b"}
+
+
+def test_run_record_reads_lines_without_consolidated():
+    """Log lines written before the consolidated field existed still load, as not consolidated."""
+    data = json.loads(make_run("r1").to_json())
+    del data["consolidated"]
+    assert RunRecord.from_json(json.dumps(data)).consolidated is False
 
 
 def test_reingest_unknown_run_changes_nothing(tmp_path):
