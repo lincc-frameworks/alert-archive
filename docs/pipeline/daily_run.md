@@ -58,8 +58,8 @@ The job refuses to start unless:
 
 It runs on a whole `milano` node on the `rubin:default` account, with a
 two-hour limit. Jobs on that account are preemptable: Slurm can cancel them at
-any time to make room for higher-priority work, and a cancelled run leaves its
-lock behind (see [Runbook](runbook.md)).
+any time to make room for higher-priority work. A cancelled run leaves its lock
+behind, and the next run takes it over (see [Runbook](runbook.md)).
 
 Its log is `alert-archive-daily-<jobid>.log`, in the repo root. Follow it with:
 
@@ -81,8 +81,8 @@ the skymaps has occasionally taken far longer, close to an hour
 When it finishes you get two emails:
 
 - **The run's summary**, from the pipeline. Its subject starts with
-  `[alert-archive]`, then ✅ if everything was ingested or ❌ if the run skipped
-  chunks or found a format change.
+  `[alert-archive]`, then ✅ if everything was ingested, ⚠️ if the run took over
+  a stale lock, or ❌ if it skipped chunks or found a format change.
 - **Slurm's job email**, saying the job ended or failed.
 
 If a run crashes, it sends no summary, so Slurm's email and the job log are
