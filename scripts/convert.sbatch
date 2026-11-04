@@ -3,7 +3,7 @@
 #
 #   sbatch scripts/convert.sbatch [out-dir]
 #
-#SBATCH --job-name=alert-parquet
+#SBATCH --job-name=convert-from-avro
 #SBATCH --account=rubin:default
 #SBATCH --partition=milano
 #SBATCH --nodes=1
