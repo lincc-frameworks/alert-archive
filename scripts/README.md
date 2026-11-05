@@ -38,16 +38,11 @@ setup lsst_distrib
 pip install -e <checkout>
 ```
 
-This adds the `alert-archive` command. `python -m alert_archive` is the same
-command; the job uses it, so it doesn't depend on `PATH`. In
-`convert_from_avro.sbatch`, check the `--output` (log file) and `--mail-user`
-lines.
-
 ## Running it
 
 ```bash
-sbatch scripts/convert_from_avro.sbatch             # nightly, into landing/
-alert-archive convert-from-avro --out-dir <dir>     # or by hand
+sbatch scripts/convert_from_avro.sbatch <dir>       # SLURM job, in a milano node
+alert-archive convert-from-avro --out-dir <dir>     # or in an interactive node
 ```
 
 If a chunk fails, the job exits with 1, so Slurm emails. If the job fails or
@@ -56,9 +51,8 @@ conversions into the same directory at once.
 
 **Full reconversion** (e.g. to get `schemaId` and the 1101 fields for the
 alerts the original script converted): run the job into a new directory,
-`sbatch scripts/convert_from_avro.sbatch <new-dir>`, again and again until
-its log says `0 new subdirectories`, then make that directory the job's
-default. Older alerts might be slow to read (see below).
+`sbatch scripts/convert_from_avro.sbatch <new-dir>`. Older alerts might
+be slow to read (see below).
 
 ## When something fails
 
@@ -70,9 +64,9 @@ default. Older alerts might be slow to read (see below).
 
 ## Known limitations
 
-- **Each subdirectory is listed once.** Alerts added to it later, e.g. because
-  it was still being written during the nightly run, are never converted
-  (`docs/pipeline/known_issues.md`).
+- **Each subdirectory is listed once.** Alerts added to a subdirectory later,
+  after it has finished processing, e.g. because it was still being written
+  during the nightly run, are never converted (`docs/pipeline/known_issues.md`).
 
 ## Performance
 
@@ -80,5 +74,5 @@ default. Older alerts might be slow to read (see below).
   the shared filesystem). 64 threads was the fastest, at about 270 files/s.
 - **November 2026:** recent alerts converted at about 2,000 files/s on one
   node, but old ones took 0.2 to 4 s each to read (roughly 50 files/s),
-  probably because they're on slower storage. Keep this in mind for a full
-  reconversion.
+  probably because they're on colder storage. Keep this in mind for a full
+  reconversion. Multi-node support might be needed.

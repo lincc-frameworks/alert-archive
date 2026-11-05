@@ -21,7 +21,7 @@ def main(argv=None) -> int:
     Parameters
     ----------
     argv : list[str] or None
-        Arguments, without the program name. Defaults to ``sys.argv[1:]``.
+        Arguments, without the program name.
 
     Returns
     -------

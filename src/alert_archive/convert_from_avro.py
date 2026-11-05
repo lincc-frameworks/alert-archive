@@ -49,7 +49,7 @@ CHUNK_SIZE = 50_000
 
 THREADS = 64
 """Files decoded at once. Most of the time goes to opening each file on the shared
-filesystem, so many are opened at once (64 was the fastest in June 2026)."""
+filesystem, so many are opened at once."""
 
 MAX_LOGGED_ERRORS = 10
 """Decoding errors logged per chunk, followed by how many more there are."""
@@ -93,16 +93,12 @@ def update(
         If the archive isn't there.
     """
     out_dir = Path(out_dir)
-    manifest = read_manifest(out_dir) or {
-        "archive": str(archive_dir),
-        "chunk_size": chunk_size,
-        "subdirs": [],
-        "chunks": [],
-    }
+    manifest = read_manifest(out_dir, archive_dir, chunk_size)
     if Path(manifest["archive"]) != Path(archive_dir):
         raise ValueError(f"{out_dir} is for archive {manifest['archive']}, not {archive_dir}")
-    if not Path(archive_dir).is_dir():  # e.g. not mounted: fail rather than find nothing new
+    if not Path(archive_dir).is_dir():
         raise FileNotFoundError(f"archive {archive_dir} not found")
+
     converted = {s["subdir"] for s in manifest["subdirs"]}
     new = [d for d in list_subdirs(archive_dir) if d.name not in converted]
     logger.info("%d new subdirectories", len(new))
@@ -175,10 +171,21 @@ def _chunks(subdir: str, n_files: int, chunk_size: int) -> list[dict]:
     return chunks
 
 
-def read_manifest(out_dir) -> dict | None:
-    """The converted subdirectories and chunks in ``out_dir``, or None if nothing is converted yet."""
+def read_manifest(out_dir, archive_dir=ARCHIVE_DIR, chunk_size: int = CHUNK_SIZE) -> dict:
+    """The converted subdirectories and chunks in ``out_dir``.
+
+    If nothing is converted there yet, an empty manifest for ``archive_dir``,
+    with ``chunk_size`` alerts per chunk.
+    """
     path = Path(out_dir) / MANIFEST_NAME
-    return json.loads(path.read_text()) if path.exists() else None
+    if path.exists():
+        return json.loads(path.read_text())
+    return {
+        "archive": str(archive_dir),
+        "chunk_size": chunk_size,
+        "subdirs": [],
+        "chunks": [],
+    }
 
 
 def _save_manifest(out_dir: Path, manifest: dict):
@@ -242,17 +249,24 @@ def convert_chunk(paths, out_path, threads: int = THREADS) -> ChunkResult:
     if errors:
         return ChunkResult(out_path.name, len(paths), "failed", errors)
 
-    table = pa.Table.from_pylist(decoded, schema=target_schema())
-    tmp = out_path.with_name(f".{out_path.name}.{os.getpid()}.tmp")
+    _write_parquet_atomic(pa.Table.from_pylist(decoded, schema=target_schema()), out_path)
+    return ChunkResult(out_path.name, len(paths), "written", seconds=time.monotonic() - start)
+
+
+def _write_parquet_atomic(table: pa.Table, path: Path):
+    """Write a parquet file under a temporary name, sync it to disk, then rename it.
+
+    So a file under its final name is always complete, even after a crash.
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         with open(tmp, "wb") as f:
             pq.write_table(table, f)
             f.flush()
-            os.fsync(f.fileno())  # on disk before the rename, so a crash can't leave a partial chunk
-        os.replace(tmp, out_path)
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
-    return ChunkResult(out_path.name, len(paths), "written", seconds=time.monotonic() - start)
 
 
 def _try_decode(path) -> dict | str:
@@ -293,7 +307,7 @@ class UnknownFormatError(Exception):
     """An alert's format ID has no schema in ``alert_archive/schemas``."""
 
     def __init__(self, schema_id: int):
-        super().__init__(f"unknown alert format {schema_id}; add its schema to alert_archive/schemas")
+        super().__init__(f"Unknown alert format {schema_id}: add its schema to alert_archive/schemas.")
         self.schema_id = schema_id
 
 
