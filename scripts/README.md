@@ -16,7 +16,7 @@ manifest yet:
 landing/
 ├── <subdir>__<start>-<end>.parquet   files start to end - 1 of a subdirectory, at most 50,000
 ├── manifest.json                     the subdirectories converted so far, and their chunks
-└── pending/<subdir>.txt              the files of a subdirectory that isn't finished yet
+└── chunk_lists/<subdir>.txt          the files of a subdirectory that isn't finished yet
 ```
 
 - **Columns:** every field of the newest alert format (1101), plus
@@ -26,7 +26,7 @@ landing/
   decode, nothing is written, and the log lists the files that failed.
 - **A subdirectory goes into the manifest once all its chunks are written**,
   and is never looked at again. Until then, each run tries it again, with the
-  same files (from `pending/`), skipping the chunks already written.
+  same files (from `chunk_lists/`), skipping the chunks already written.
 
 ## Setup
 

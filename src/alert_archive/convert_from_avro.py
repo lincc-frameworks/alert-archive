@@ -41,8 +41,9 @@ ARCHIVE_DIR = Path("/sdf/data/rubin/shared/alert-archive/v2/alerts")
 MANIFEST_NAME = "manifest.json"
 """File in the output directory listing the converted subdirectories and their chunks."""
 
-PENDING_DIR_NAME = "pending"
-"""Directory in the output directory with the file lists of subdirectories not in the manifest yet."""
+CHUNK_LISTS_DIR_NAME = "chunk_lists"
+"""Directory in the output directory with the file list of each subdirectory not in the
+manifest yet. Its chunks are slices of that list."""
 
 CHUNK_SIZE = 50_000
 """Alerts per chunk. A subdirectory's last chunk holds the rest."""
@@ -95,14 +96,17 @@ def update(
     out_dir = Path(out_dir)
     manifest = read_manifest(out_dir, archive_dir, chunk_size)
     if Path(manifest["archive"]) != Path(archive_dir):
-        raise ValueError(f"{out_dir} is for archive {manifest['archive']}, not {archive_dir}")
+        raise ValueError(f"Manifest in {out_dir} is for archive {manifest['archive']}, not {archive_dir}")
     if not Path(archive_dir).is_dir():
-        raise FileNotFoundError(f"archive {archive_dir} not found")
+        raise FileNotFoundError(f"Archive in {archive_dir} not found")
 
     converted = {s["subdir"] for s in manifest["subdirs"]}
     new = [d for d in list_subdirs(archive_dir) if d.name not in converted]
     logger.info("%d new subdirectories", len(new))
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not (out_dir / MANIFEST_NAME).exists():
+        # Saved before anything is converted, so retries keep the chunk size even if nothing finishes now.
+        _save_manifest(out_dir, manifest)
 
     results = []
     for i, subdir in enumerate(new, 1):
@@ -123,7 +127,7 @@ def update(
             manifest["subdirs"].append({"subdir": subdir.name, "n_files": len(paths)})
             manifest["chunks"] += chunks
             _save_manifest(out_dir, manifest)
-            _pending_list(out_dir, subdir).unlink()
+            _chunk_list(out_dir, subdir).unlink()
     return results
 
 
@@ -145,7 +149,7 @@ def _alert_files(out_dir: Path, subdir: Path) -> list[str]:
     the same chunks even if the subdirectory changed, and never writes an
     alert twice. Empty subdirectories aren't saved, so they're listed again.
     """
-    saved = _pending_list(out_dir, subdir)
+    saved = _chunk_list(out_dir, subdir)
     if saved.exists():
         names = saved.read_text().splitlines()
     else:
@@ -156,9 +160,9 @@ def _alert_files(out_dir: Path, subdir: Path) -> list[str]:
     return [os.path.join(subdir, name) for name in names]
 
 
-def _pending_list(out_dir: Path, subdir: Path) -> Path:
+def _chunk_list(out_dir: Path, subdir: Path) -> Path:
     """File with the names of a subdirectory's alert files, while it's not in the manifest."""
-    return out_dir / PENDING_DIR_NAME / f"{subdir.name}.txt"
+    return out_dir / CHUNK_LISTS_DIR_NAME / f"{subdir.name}.txt"
 
 
 def _chunks(subdir: str, n_files: int, chunk_size: int) -> list[dict]:
@@ -226,7 +230,7 @@ def convert_chunk(paths, out_path, threads: int = THREADS) -> ChunkResult:
 
     Parameters
     ----------
-    paths : list[str]
+    paths : list[str] or list[path-like]
         The chunk's alert files.
     out_path : str or path-like
         Parquet file to write.
@@ -307,7 +311,7 @@ class UnknownFormatError(Exception):
     """An alert's format ID has no schema in ``alert_archive/schemas``."""
 
     def __init__(self, schema_id: int):
-        super().__init__(f"Unknown alert format {schema_id}: add its schema to alert_archive/schemas.")
+        super().__init__(f"Add schema of ID {schema_id} to alert_archive/schemas.")
         self.schema_id = schema_id
 
 
