@@ -8,10 +8,13 @@
 #
 # Crontab line (run `crontab -e` on sdfcron001; <you> is your username):
 #
-#   17 3 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+#   17 6 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 #
-# Runs at 03:17 Pacific: overnight, when the cluster is quietest and preemption
-# is least likely, and off the hour, when many other cron jobs fire.
+# Runs at 06:17 Pacific: after the daily pipeline run (~05:00) has added the
+# night's alerts to the catalog, in the hours when milano preempts the fewest
+# jobs (04:00-08:00 Pacific in Oct-Nov 2026), and off the hour, when many
+# other cron jobs fire. run.sbatch skips the night if the daily run is still
+# going.
 #
 # What it does:
 #   1. Resets the job's own clone of alert-archive to the requested branch on
