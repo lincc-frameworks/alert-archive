@@ -18,7 +18,7 @@ import os
 import socket
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -101,7 +101,7 @@ def _schema_id_from_key(key: str) -> int | None:
     return None if key == UNKNOWN_SCHEMA_ID else int(key)
 
 
-def new_run_id(now: datetime | None = None) -> str:
+def new_run_id(now: datetime | None = None, date_only: bool = False) -> str:
     """Make a run ID from the current UTC time, e.g. ``"20261027T031500Z"``.
 
     Runs never overlap (see :meth:`PipelineState.lock`), so a timestamp to
@@ -111,6 +111,9 @@ def new_run_id(now: datetime | None = None) -> str:
     ----------
     now : datetime or None
         Time to use instead of the current time. Must be timezone-aware.
+    date_only : bool
+        Return just the UTC date, e.g. ``"20261027"``. Versions of the
+        collection are named by it, so the weekly re-import runs at most once a day.
 
     Returns
     -------
@@ -118,7 +121,7 @@ def new_run_id(now: datetime | None = None) -> str:
         The run ID.
     """
     now = now or datetime.now(UTC)
-    return now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return now.astimezone(UTC).strftime("%Y%m%d" if date_only else "%Y%m%dT%H%M%SZ")
 
 
 class PipelineState:
@@ -286,6 +289,24 @@ class PipelineState:
         kept = [r for r in self.runs() if r.run_id not in removed_ids]
         write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
         return removed
+
+    def mark_consolidated(self, run_ids):
+        """Mark the runs a weekly re-import merged as :attr:`~RunRecord.consolidated`.
+
+        :meth:`reingest_runs` then refuses them, even with ``missing_files_ok``,
+        which would ingest their alerts a second time. The weekly calls this
+        holding the lock, before the collection points at the merged catalog: a
+        run marked too early is only refused needlessly, but one merged and not
+        marked could be ingested twice. The log is rewritten atomically.
+
+        Raises
+        ------
+        KeyError
+            If any of the IDs isn't in the log. Nothing is marked then.
+        """
+        marked_ids = {r.run_id for r in self._find_runs(run_ids)}
+        runs = [replace(r, consolidated=True) if r.run_id in marked_ids else r for r in self.runs()]
+        write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in runs))
 
     def _find_runs(self, run_ids) -> list[RunRecord]:
         """Look up runs in the ingested log by ID.
