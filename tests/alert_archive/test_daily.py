@@ -6,6 +6,8 @@ import pytest
 from alert_archive.daily import run as daily
 from alert_archive.daily.increment import leaf_files
 from alert_archive.daily.run import DailyPipeline, check_formats, find_new_chunks, main
+from alert_archive.notify import OK_MARK
+from alert_archive.schema import known_schema, target_schema
 from alert_archive.state import PipelineState, RunRecord
 from conftest import BASELINE_CHUNK_NAMES, shift_ids
 from dask.distributed import Client
@@ -125,6 +127,58 @@ def test_daily_stops_on_format_change(v2_config, landing, new_alerts, tmp_path, 
     state.clear_format_change()
     (landing / "313630__00000000-00000004.parquet").unlink()
     assert run_daily(v2_config, tmp_path).chunks == [NEW_CHUNK]
+
+
+def with_1102_fields(table):
+    """Copy of alerts with format 1102's new fields added to diaSource and prvDiaSources, all set."""
+    new_fields = [
+        f
+        for f in known_schema(1102).field("diaSource").type
+        if f.name not in target_schema().field("diaSource").type.names
+    ]
+
+    def add(struct):
+        children = [struct.field(i) for i in range(struct.type.num_fields)]
+        values = [pa.array([_example_value(f.type)] * len(struct), f.type) for f in new_fields]
+        return pa.StructArray.from_arrays(children + values, fields=list(struct.type) + new_fields)
+
+    dia_source = add(table.column("diaSource").combine_chunks())
+    prv = table.column("prvDiaSources").combine_chunks()
+    prv = pa.ListArray.from_arrays(
+        prv.offsets, add(prv.values), mask=prv.is_null() if prv.null_count else None
+    )
+    table = table.set_column(table.column_names.index("diaSource"), "diaSource", dia_source)
+    table = table.set_column(table.column_names.index("prvDiaSources"), "prvDiaSources", prv)
+    return table.append_column("schemaId", pa.array([1102] * len(table), pa.int32()))
+
+
+def _example_value(dtype):
+    return {pa.bool_(): True, pa.string(): "LSSTCam", pa.float64(): 60000.5, pa.int32(): 3}[dtype]
+
+
+def test_daily_ingests_1102_without_new_fields(v2_config, landing, new_alerts, tmp_path, emails):
+    """1102 alerts are ingested into the catalog's columns, without 1102's new fields.
+
+    That isn't a format change: the flag stays clear and the email says OK.
+    """
+    pq.write_table(with_1102_fields(new_alerts), landing / NEW_CHUNK)
+    reports, _ = check_formats([landing / NEW_CHUNK])
+    assert not reports[NEW_CHUNK].is_format_change
+    assert "diaSource.templateMjdMin" in reports[NEW_CHUNK].dropped_known
+
+    record = run_daily(v2_config, tmp_path)
+    state = PipelineState(v2_config.paths.state_dir)
+    assert state.format_change() is None
+    assert record.chunks == [NEW_CHUNK]
+    assert record.schema_id_counts == {1102: len(new_alerts)}
+
+    working = v2_config.paths.working_dir
+    catalog_schema = pq.read_schema(working / "dataset" / "_common_metadata")
+    for path in (p for files in leaf_files(working).values() for p in files if p.stem == record.run_id):
+        schema = pq.ParquetFile(path).schema_arrow
+        assert schema.remove_metadata().equals(catalog_schema.remove_metadata())
+        assert "templateMjdMin" not in schema.field("diaSource").type.names
+    assert emails[0][0].startswith(OK_MARK)
 
 
 def test_daily_removes_orphans(v2_config, landing, tmp_path):

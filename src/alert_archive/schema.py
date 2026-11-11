@@ -4,8 +4,9 @@ Rubin alerts are written in one of several Avro formats ("schemas"), each
 identified by a numeric ID. Copies of the known formats live in
 ``alert_archive/schemas/<id>.json`` (from
 ``/sdf/data/rubin/shared/alert-archive/v2/schemas``). The catalog uses the
-columns of the newest known format, minus :data:`EXCLUDED_COLUMNS`, plus a
-``schemaId`` column.
+columns of :data:`CATALOG_SCHEMA_ID`, minus :data:`EXCLUDED_COLUMNS`, plus a
+``schemaId`` column. Alerts in a newer known format are ingested without the
+fields that format added, until the catalog is re-imported with them.
 
 :func:`conform_alerts` converts a table of alerts, as stored in the input
 parquet files, to those columns. It never raises on unexpected data: it does
@@ -24,6 +25,14 @@ import pyarrow.compute as pc
 
 SCHEMA_ID_COLUMN = "schemaId"
 """Column holding each alert's format ID."""
+
+CATALOG_SCHEMA_ID = 1101
+"""The alert format whose columns the catalog has.
+
+Newer known formats are still ingested: the fields they added are dropped
+(see :attr:`ConformReport.dropped_known`). Raising this changes the catalog's
+columns, which needs a re-import of the whole catalog.
+"""
 
 EXCLUDED_COLUMNS = ("ssSource", "mpc_orbits", "cutoutDifference", "cutoutScience", "cutoutTemplate")
 """Alert columns left out of the catalog.
@@ -149,7 +158,7 @@ def known_schema(schema_id: int) -> pa.Schema:
 def target_schema() -> pa.Schema:
     """Columns of the catalog's input tables, before :mod:`alert_archive.reader` reshapes them.
 
-    The newest known format's columns, with ``schemaId`` after
+    :data:`CATALOG_SCHEMA_ID`'s columns, with ``schemaId`` after
     ``diaSourceId`` and every field nullable at every level. Nullability is
     dropped because a best-effort conversion can produce nulls anywhere, and
     the reader's nesting step doesn't keep it anyway.
@@ -159,7 +168,7 @@ def target_schema() -> pa.Schema:
     pyarrow.Schema
         The target schema.
     """
-    fields = [_nullable(f) for f in known_schema(known_schema_ids()[-1])]
+    fields = [_nullable(f) for f in known_schema(CATALOG_SCHEMA_ID)]
     fields.insert(1, pa.field(SCHEMA_ID_COLUMN, pa.int32()))
     return pa.schema(fields)
 
@@ -204,6 +213,17 @@ def infer_schema_id(schema: pa.Schema) -> int | None:
     return matches[-1] if matches else None
 
 
+@cache
+def _known_paths() -> frozenset[str]:
+    """Dotted paths of every column and nested field in any known format, e.g. ``"diaSource.snr"``."""
+    paths = set()
+    for schema_id in known_schema_ids():
+        for leaf in _leaf_types(known_schema(schema_id)):
+            parts = leaf.split(".")
+            paths.update(".".join(parts[: i + 1]) for i in range(len(parts)))
+    return frozenset(paths)
+
+
 def _leaf_types(schema: pa.Schema) -> dict[str, pa.DataType]:
     """Map each leaf's dotted path to its type. List levels don't add to the path."""
     leaves = {}
@@ -238,7 +258,10 @@ class ConformReport:
     inferred_schema_id: bool = False
     """True if the input had no ``schemaId`` column and it was inferred from the columns."""
     dropped: list[str] = field(default_factory=list)
-    """Input fields the catalog doesn't have. Their values are discarded."""
+    """Input fields the catalog doesn't have and no known format has. Their values are discarded."""
+    dropped_known: list[str] = field(default_factory=list)
+    """Input fields of a known format newer than the catalog's (:data:`CATALOG_SCHEMA_ID`).
+    Their values are discarded, as expected until the catalog is re-imported with them."""
     filled: list[str] = field(default_factory=list)
     """Catalog fields missing from the input, filled with nulls. Expected for older formats."""
     cast: list[str] = field(default_factory=list)
@@ -257,8 +280,9 @@ class ConformReport:
         """True if the input looks like a format we don't fully support.
 
         That is: an unknown format ID, or any field dropped, converted or set
-        to null. Fields filled with nulls alone don't count, since older
-        known formats lack some newer fields.
+        to null. Fields filled with nulls don't count, since older known
+        formats lack some newer fields, and neither do fields dropped because
+        they're from a known format newer than the catalog's.
         """
         return bool(self.unknown_schema_ids or self.dropped or self.cast or self.nulled)
 
@@ -267,7 +291,8 @@ def conform_alerts(table: pa.Table) -> tuple[pa.Table, ConformReport]:
     """Convert a table of alerts to the catalog's columns, as well as possible.
 
     Missing fields are filled with nulls, fields the catalog doesn't have
-    are dropped, and fields of a different type are converted, or set to
+    are dropped (reported in ``dropped_known`` if a known format has them,
+    else in ``dropped``), and fields of a different type are converted, or set to
     null if they can't be. :data:`EXCLUDED_COLUMNS` are dropped without being
     reported. If there's no ``schemaId`` column, one is added with the
     format inferred by :func:`infer_schema_id`.
@@ -307,6 +332,10 @@ def conform_alerts(table: pa.Table) -> tuple[pa.Table, ConformReport]:
             report.filled.append(target_field.name)
             columns.append(pa.nulls(len(table), type=target_field.type))
     result = pa.Table.from_arrays(columns, schema=target)
+
+    known = _known_paths()
+    report.dropped_known = [path for path in report.dropped if path in known]
+    report.dropped = [path for path in report.dropped if path not in known]
 
     counts = pc.value_counts(result.column(SCHEMA_ID_COLUMN).combine_chunks())
     report.schema_ids = {c["values"].as_py(): c["counts"].as_py() for c in counts}

@@ -4,6 +4,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 from alert_archive.schema import (
+    CATALOG_SCHEMA_ID,
     EXCLUDED_COLUMNS,
     SCHEMA_ID_COLUMN,
     avro_schema_to_arrow,
@@ -16,6 +17,17 @@ from alert_archive.schema import (
 
 NEW_IN_1101 = ["exposureTime", "trailAlgorithm", "trail_flag", "reliabilityVersion"]
 """diaSource fields added in format 1101, in the order they appear in the schema."""
+
+NEW_IN_1102 = [
+    "mixedInstruments",
+    "pixelFlags_spike",
+    "templateInstrument",
+    "templateMjdMax",
+    "templateMjdMean",
+    "templateMjdMin",
+    "templateVersion",
+]
+"""diaSource fields added in format 1102, sorted."""
 
 
 def as_json(table):
@@ -88,7 +100,23 @@ def test_avro_schema_to_arrow_rejects_unsupported(avro_type):
 
 def test_known_schema_ids():
     """One ID per schema file in the package."""
-    assert known_schema_ids() == (1000, 1100, 1101)
+    assert known_schema_ids() == (1000, 1100, 1101, 1102)
+
+
+def test_known_schema_1102():
+    """1102 adds seven diaSource fields, which prvDiaSources gets too, and changes nothing else."""
+    old, new = known_schema(1101), known_schema(1102)
+    assert old.names == new.names
+    for column in ["diaSource", "prvDiaSources"]:
+        old_type, new_type = old.field(column).type, new.field(column).type
+        if column == "prvDiaSources":
+            old_type, new_type = old_type.value_type, new_type.value_type
+        old_fields = {f.name: f.type for f in old_type}
+        new_fields = {f.name: f.type for f in new_type}
+        assert sorted(new_fields.keys() - old_fields.keys()) == NEW_IN_1102
+        assert all(new_fields[name] == t for name, t in old_fields.items())
+    for column in ["diaObject", "prvDiaForcedSources"]:
+        assert old.field(column).type == new.field(column).type
 
 
 def test_known_schema_1101():
@@ -103,6 +131,7 @@ def test_known_schema_1101():
 
 def test_target_schema():
     """1101's columns plus schemaId, nullable at every level, with 1101's field order."""
+    assert CATALOG_SCHEMA_ID == 1101
     target = target_schema()
     assert target.names[:2] == ["diaSourceId", SCHEMA_ID_COLUMN]
     assert target.field(SCHEMA_ID_COLUMN).type == pa.int32()
@@ -133,6 +162,11 @@ def test_infer_schema_id_dump(raw_alerts):
 def test_infer_schema_id_1101():
     """A table with the 1101 columns is recognized as 1101."""
     assert infer_schema_id(target_schema()) == 1101
+
+
+def test_infer_schema_id_1102():
+    """A table with the 1102 columns is recognized as 1102."""
+    assert infer_schema_id(known_schema(1102)) == 1102
 
 
 def test_infer_schema_id_unknown(raw_alerts):
@@ -202,6 +236,49 @@ def test_conform_drops_unknown_fields(raw_alerts):
     assert sorted(report.dropped) == ["brandNewColumn", "diaSource.brandNewField"]
     assert report.unknown_schema_ids == [None]
     assert report.is_format_change
+
+
+def test_conform_1102_drops_new_fields():
+    """1102 alerts fit the catalog's 1101 columns by dropping 1102's new fields, which isn't a format
+    change. Their other values are kept."""
+    table = pa.Table.from_pylist([{}] * 3, schema=_nullable_schema(known_schema(1102)))
+    table = with_struct_field(table, "diaSource", "templateMjdMin", [60000.5] * 3)
+    table = with_struct_field(table, "diaSource", "snr", pa.array([5.0, 6.0, 7.0], pa.float32()))
+    table = table.append_column(SCHEMA_ID_COLUMN, pa.array([1102] * 3, pa.int32()))
+
+    result, report = conform_alerts(table)
+    assert result.schema.equals(target_schema())
+    assert report.dropped == []
+    expected = [f"{c}.{n}" for c in ["diaSource", "prvDiaSources"] for n in NEW_IN_1102]
+    assert sorted(report.dropped_known) == sorted(expected)
+    assert report.schema_ids == {1102: 3}
+    assert not report.is_format_change
+    assert result.column("diaSource").combine_chunks().field("snr").to_pylist() == [5.0, 6.0, 7.0]
+    assert result.column(SCHEMA_ID_COLUMN).to_pylist() == [1102] * 3
+
+
+def test_conform_1102_with_unknown_field_is_format_change():
+    """An unknown field is still a format change, even next to fields 1102 is known to add."""
+    table = pa.Table.from_pylist([{}], schema=_nullable_schema(known_schema(1102)))
+    table = with_struct_field(table, "diaSource", "brandNewField", [1.0])
+    table = table.append_column(SCHEMA_ID_COLUMN, pa.array([1102], pa.int32()))
+    _, report = conform_alerts(table)
+    assert report.dropped == ["diaSource.brandNewField"]
+    assert "diaSource.templateMjdMin" in report.dropped_known
+    assert report.is_format_change
+
+
+def _nullable_schema(schema):
+    """Copy of a schema with every field nullable, so all-null test rows are valid."""
+    return pa.schema([_nullable_field(f) for f in schema])
+
+
+def _nullable_field(f):
+    if pa.types.is_struct(f.type):
+        return pa.field(f.name, pa.struct([_nullable_field(c) for c in f.type]))
+    if pa.types.is_list(f.type):
+        return pa.field(f.name, pa.list_(_nullable_field(f.type.value_field)))
+    return f.with_nullable(True)
 
 
 def test_conform_fills_missing_columns(raw_alerts):

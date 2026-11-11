@@ -170,6 +170,15 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   from 1000/1100 alerts get nulls for the four new `diaSource` fields
   (`exposureTime`, `reliabilityVersion`, `trailAlgorithm`, `trail_flag`).
   `prvDiaSources` reuses the `diaSource` definition, so it gets the same four fields.
+- **Format 1102 is ingested without its new fields, for now.** 1102 (from
+  2026-11-11) adds seven `diaSource`/`prvDiaSources` fields
+  (`mixedInstruments`, `pixelFlags_spike`, `templateInstrument`,
+  `templateMjdMin`/`Mean`/`Max`, `templateVersion`) and changes nothing else.
+  The catalog keeps the 1101 columns (`CATALOG_SCHEMA_ID`), and 1102 alerts
+  are ingested with those seven fields dropped. Dropping fields of a known
+  newer format isn't a format change; any other dropped field still is.
+  Adding the fields means raising `CATALOG_SCHEMA_ID` and re-importing the
+  whole catalog. The raw Avro alerts keep the values until then.
 - **`ssSource` and `mpc_orbits` are left out for now (may revisit).** All three
   alert formats include them for solar-system alerts (about 21% of alerts),
   but Neven's dump and the frozen catalog drop them. These values exist only
