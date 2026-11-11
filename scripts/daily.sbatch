@@ -21,8 +21,8 @@
 #SBATCH --account=rubin:default
 #SBATCH --partition=milano
 #SBATCH --constraint=OS_VER:9.6
-#SBATCH --exclusive
-#SBATCH --mem=0
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=160G
 #SBATCH --time=02:00:00
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT
 #SBATCH --output=%x-%j.log
@@ -58,4 +58,6 @@ echo "LSST env: $LSST_CONDA_ENV_NAME"
 umask 0002  # group-writable, so other rubin_users can read and later jobs can write
 
 # Default Dask settings (8 workers x 16 GiB), temp files under $LSCRATCH (node-local).
+# The job asks for just that, plus room for the main process, rather than a whole node:
+# a smaller job is quicker to schedule and less often in the way of higher-priority jobs.
 python -c "from alert_archive.daily.run import main; print(main())"
