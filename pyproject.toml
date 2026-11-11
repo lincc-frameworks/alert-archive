@@ -18,12 +18,16 @@ classifiers = [
 dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
+    "fastavro",
     "lsdb",
     "nested-pandas",
     "hats",
     "hats-import",
     "pyarrow",
 ]
+
+[project.scripts]
+alert-archive = "alert_archive.cli:main"
 
 [project.urls]
 "Source Code" = "https://github.com/lincc-frameworks/alert-archive"

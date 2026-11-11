@@ -126,6 +126,22 @@ def known_schema_ids() -> tuple[int, ...]:
     return tuple(sorted(int(n.removesuffix(".json")) for n in file_names if n.endswith(".json")))
 
 
+def known_avro_schema(schema_id: int) -> dict:
+    """Avro schema of a known alert format, as in the package's copy.
+
+    Parameters
+    ----------
+    schema_id : int
+        One of :func:`known_schema_ids`.
+
+    Returns
+    -------
+    dict
+        The parsed JSON of ``alert_archive/schemas/<schema_id>.json``.
+    """
+    return json.loads(files("alert_archive.schemas").joinpath(f"{schema_id}.json").read_text())
+
+
 @cache
 def known_schema(schema_id: int) -> pa.Schema:
     """Arrow schema of a known alert format, minus :data:`EXCLUDED_COLUMNS`.
@@ -140,8 +156,7 @@ def known_schema(schema_id: int) -> pa.Schema:
     pyarrow.Schema
         The format's columns, with Avro's nullability.
     """
-    text = files("alert_archive.schemas").joinpath(f"{schema_id}.json").read_text()
-    schema = avro_schema_to_arrow(json.loads(text))
+    schema = avro_schema_to_arrow(known_avro_schema(schema_id))
     return pa.schema([column for column in schema if column.name not in EXCLUDED_COLUMNS])
 
 
