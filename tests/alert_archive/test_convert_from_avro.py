@@ -32,8 +32,9 @@ def converted_subdirs(out_dir):
         ("170019/170019695985952427.avro.gz", 170019695985952427, 1000),
         ("170450/170450700567839112.avro.gz", 170450700567839112, 1100),
         ("171167/171167627158226197.avro.gz", 171167627158226197, 1101),
+        ("171194/171194007958847495.avro.gz", 171194007958847495, 1102),
     ],
-    ids=["1000", "1100", "1101"],
+    ids=["1000", "1100", "1101", "1102"],
 )
 def test_decode_alert(avro_alerts, path, dia_source_id, schema_id):
     """A sample alert decodes to its format's fields, plus schemaId."""
@@ -64,7 +65,7 @@ def test_convert_chunk_writes_catalog_columns(tmp_path, avro_alert_files):
     """A chunk has exactly the target schema, and each alert's own schemaId."""
     out = tmp_path / "chunk.parquet"
     result = convert_chunk(avro_alert_files, out, threads=2)
-    assert (result.status, result.n_files, result.errors) == ("written", 3, [])
+    assert (result.status, result.n_files, result.errors) == ("written", 4, [])
 
     assert pq.read_schema(out).equals(target_schema())
     chunk = npd.read_parquet(out)
@@ -72,12 +73,17 @@ def test_convert_chunk_writes_catalog_columns(tmp_path, avro_alert_files):
         170019695985952427,
         170450700567839112,
         171167627158226197,
+        171194007958847495,
     ]
-    assert chunk["schemaId"].tolist() == [1000, 1100, 1101]
-    # A field new in 1101 is kept, and null for the older formats.
+    assert chunk["schemaId"].tolist() == [1000, 1100, 1101, 1102]
+    # Fields new in 1101 and 1102 are kept, and null for the older formats.
     exposure_time = chunk["diaSource"].struct.field("exposureTime")
-    assert exposure_time.isna().tolist() == [True, True, False]
+    assert exposure_time.isna().tolist() == [True, True, False, False]
     assert exposure_time.iloc[2] == pytest.approx(38.0, abs=1e-3)
+    assert exposure_time.iloc[3] == pytest.approx(30.0, abs=1e-3)
+    template_instrument = chunk["diaSource"].struct.field("templateInstrument")
+    assert template_instrument.isna().tolist() == [True, True, True, False]
+    assert template_instrument.iloc[3] == "LSSTCam"
 
 
 def test_convert_chunk_fails_on_any_bad_file(tmp_path, avro_alert_files):
@@ -121,6 +127,7 @@ def test_update(avro_alerts, avro_alerts_manifest, tmp_path):
         ("170019__00000000-00000001.parquet", "written"),
         ("170450__00000000-00000001.parquet", "written"),
         ("171167__00000000-00000001.parquet", "written"),
+        ("171194__00000000-00000001.parquet", "written"),
     ]
     chunk = npd.read_parquet(out / "170019__00000000-00000001.parquet")
     assert chunk["diaSourceId"].tolist() == [170019695985952427]
@@ -152,10 +159,11 @@ def test_update_with_nothing_new(avro_alerts, tmp_path):
 def test_update_retries_subdirs_with_a_failed_chunk(tmp_path, avro_alert_files):
     """A subdirectory with a failed chunk isn't recorded, and the next update retries the same files."""
     archive, out = tmp_path / "alerts", tmp_path / "landing"
-    # One subdirectory with the three alerts: chunks [1000, 1100] and [1101], with a chunk size of 2.
+    # One subdirectory with the 1000, 1100 and 1101 alerts: chunks [1000, 1100] and [1101],
+    # with a chunk size of 2.
     a = archive / "a"
     a.mkdir(parents=True)
-    for path in avro_alert_files:
+    for path in avro_alert_files[:3]:
         shutil.copy(path, a)
     first = a / "170019695985952427.avro.gz"
     alert = first.read_bytes()
@@ -188,7 +196,7 @@ def test_update_skips_empty_subdirs_until_they_have_alerts(avro_alerts, tmp_path
     out = tmp_path / "landing"
     (avro_alerts / "empty").mkdir()
     update(out, avro_alerts, threads=2)
-    assert converted_subdirs(out) == ["170019", "170450", "171167"]
+    assert converted_subdirs(out) == ["170019", "170450", "171167", "171194"]
     # Nothing is saved for the empty one.
     assert list((out / "chunk_lists").iterdir()) == []
 

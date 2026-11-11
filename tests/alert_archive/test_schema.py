@@ -17,6 +17,17 @@ from alert_archive.schema import (
 NEW_IN_1101 = ["exposureTime", "trailAlgorithm", "trail_flag", "reliabilityVersion"]
 """diaSource fields added in format 1101, in the order they appear in the schema."""
 
+NEW_IN_1102 = [
+    "pixelFlags_spike",
+    "templateMjdMean",
+    "templateMjdMin",
+    "templateMjdMax",
+    "templateInstrument",
+    "templateVersion",
+    "mixedInstruments",
+]
+"""diaSource fields added in format 1102, in the order they appear in the schema."""
+
 
 def as_json(table):
     """Values of a table as JSON, for comparisons where NaN must equal NaN."""
@@ -88,7 +99,7 @@ def test_avro_schema_to_arrow_rejects_unsupported(avro_type):
 
 def test_known_schema_ids():
     """One ID per schema file in the package."""
-    assert known_schema_ids() == (1000, 1100, 1101)
+    assert known_schema_ids() == (1000, 1100, 1101, 1102)
 
 
 def test_known_schema_1101():
@@ -101,8 +112,19 @@ def test_known_schema_1101():
     assert not set(EXCLUDED_COLUMNS) & set(schema.names)
 
 
+def test_known_schema_1102():
+    """1102 adds seven diaSource fields, which prvDiaSources gets too, and keeps all of 1101's."""
+    schema = known_schema(1102)
+    assert schema.names == known_schema(1101).names
+    dia_source = schema.field("diaSource").type
+    assert dia_source.num_fields == 109
+    assert schema.field("prvDiaSources").type.value_type == dia_source
+    old_names = [f.name for f in known_schema(1101).field("diaSource").type]
+    assert [f.name for f in dia_source if f.name not in old_names] == NEW_IN_1102
+
+
 def test_target_schema():
-    """1101's columns plus schemaId, nullable at every level, with 1101's field order."""
+    """1102's columns plus schemaId, nullable at every level, with 1102's field order."""
     target = target_schema()
     assert target.names[:2] == ["diaSourceId", SCHEMA_ID_COLUMN]
     assert target.field(SCHEMA_ID_COLUMN).type == pa.int32()
@@ -111,6 +133,7 @@ def test_target_schema():
     dia_source = target.field("diaSource").type
     names = [f.name for f in dia_source]
     assert names[names.index("midpointMjdTai") + 1] == "exposureTime"
+    assert names[names.index("pixelFlags_saturatedCenter") + 1] == "pixelFlags_spike"
 
     def all_nullable(f):
         if pa.types.is_struct(f.type):
@@ -130,9 +153,10 @@ def test_infer_schema_id_dump(raw_alerts):
     assert infer_schema_id(raw_alerts.schema) == 1100
 
 
-def test_infer_schema_id_1101():
-    """A table with the 1101 columns is recognized as 1101."""
-    assert infer_schema_id(target_schema()) == 1101
+@pytest.mark.parametrize("schema_id", [1101, 1102])
+def test_infer_schema_id_newer_formats(schema_id):
+    """A table with the 1101 or 1102 columns is recognized as that format."""
+    assert infer_schema_id(known_schema(schema_id)) == schema_id
 
 
 def test_infer_schema_id_unknown(raw_alerts):
@@ -147,12 +171,13 @@ def test_infer_schema_id_unknown(raw_alerts):
 
 
 def test_conform_dump(raw_alerts):
-    """Dump alerts get the target columns; only the 1101 fields are filled with nulls."""
+    """Dump alerts get the target columns; only the fields new in 1101 and 1102 are filled with nulls."""
     table, report = conform_alerts(raw_alerts)
     assert table.schema.equals(target_schema())
     assert report.inferred_schema_id
     assert report.schema_ids == {1100: len(raw_alerts)}
-    expected_filled = [f"{c}.{n}" for c in ["diaSource", "prvDiaSources"] for n in NEW_IN_1101]
+    new = NEW_IN_1101 + NEW_IN_1102
+    expected_filled = [f"{c}.{n}" for c in ["diaSource", "prvDiaSources"] for n in new]
     assert sorted(report.filled) == sorted(expected_filled)
     assert report.dropped == report.cast == []
     assert report.nulled == {}
@@ -164,7 +189,7 @@ def test_conform_keeps_values(raw_alerts):
     table, _ = conform_alerts(raw_alerts)
     rows = table.select(raw_alerts.column_names).to_pylist()
     for row in rows:
-        for name in NEW_IN_1101:
+        for name in NEW_IN_1101 + NEW_IN_1102:
             del row["diaSource"][name]
             for prv in row["prvDiaSources"] or []:
                 del prv[name]
@@ -172,11 +197,11 @@ def test_conform_keeps_values(raw_alerts):
     assert table.column("prvDiaSources").null_count == raw_alerts.column("prvDiaSources").null_count > 0
 
 
-def test_conform_1101_round_trip(raw_alerts):
-    """Converted alerts without schemaId are recognized as 1101 and need no changes."""
+def test_conform_round_trip(raw_alerts):
+    """Converted alerts without schemaId are recognized as the newest format, 1102, and need no changes."""
     once, _ = conform_alerts(raw_alerts)
     twice, report = conform_alerts(once.drop_columns([SCHEMA_ID_COLUMN]))
-    assert report.schema_ids == {1101: len(raw_alerts)}
+    assert report.schema_ids == {1102: len(raw_alerts)}
     assert report.filled == report.dropped == report.cast == []
     assert as_json(twice.drop_columns([SCHEMA_ID_COLUMN])) == as_json(once.drop_columns([SCHEMA_ID_COLUMN]))
 

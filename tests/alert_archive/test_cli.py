@@ -15,7 +15,7 @@ def test_convert_from_avro(avro_alerts, unknown_format_alert, tmp_path, caplog):
         "2",
     ]
     assert main(args) == 0
-    assert caplog.messages[-1] == "done: 3 written, 0 already converted, 0 failed"
+    assert caplog.messages[-1] == "done: 4 written, 0 already converted, 0 failed"
 
     (avro_alerts / "new").mkdir()
     shutil.copy(unknown_format_alert, avro_alerts / "new")
