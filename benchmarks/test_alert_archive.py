@@ -16,7 +16,8 @@ from nested_pandas import NestedFrame
 
 SAMPLES_PATH = Path(__file__).parent / "diaObjectId_samples.npy"
 
-# The catalogs define no default columns, so each benchmark selects what it uses.
+# Each benchmark selects the columns it uses (Gaia has no default columns, and
+# the alert archive's defaults may change).
 # ``ra``/``dec`` are always loaded by lsdb.
 SOURCE_COLUMNS = [
     "diaSourceId",

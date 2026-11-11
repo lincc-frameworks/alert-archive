@@ -7,7 +7,9 @@ import pytest
 from dask.distributed import Client, LocalCluster
 from lbench.runner import run_cprofile, run_memray
 
-ALERT_ARCHIVE_PATH = "/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive"
+# The daily-updated working catalog. Its contents grow every night, so timings
+# reflect both code changes and catalog growth.
+ALERT_ARCHIVE_PATH = "/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/working"
 GAIA_PATH = "/sdf/data/rubin/cosmicdata/lsdb/gaia_dr3"
 
 
@@ -15,11 +17,12 @@ GAIA_PATH = "/sdf/data/rubin/cosmicdata/lsdb/gaia_dr3"
 def alert_archive():
     """Return an opener for the Rubin alert archive catalog.
 
-    The catalog has no ``default_columns``, so opening it bare loads every
-    column, including the ``prvDiaSources`` and ``prvDiaForcedSources`` histories
-    (~134 MB per partition in memory, vs ~5-10 MB for a few ``diaSource``
-    fields). Each benchmark passes the columns it needs; nested sub-columns
-    use dot notation, e.g. ``"diaSource.band"``.
+    Each benchmark passes the columns it needs rather than relying on the
+    catalog's ``default_columns``, so results don't change when the defaults
+    do. Loading everything would include the ``prvDiaSources`` and
+    ``prvDiaForcedSources`` histories (~134 MB per partition in memory, vs
+    ~5-10 MB for a few ``diaSource`` fields). Nested sub-columns use dot
+    notation, e.g. ``"diaSource.band"``.
     """
     return lambda columns: lsdb.open_catalog(ALERT_ARCHIVE_PATH, columns=columns)
 

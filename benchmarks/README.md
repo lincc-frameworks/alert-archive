@@ -225,12 +225,14 @@ logged just above it. Each line names who ran it; for install errors, check
 `pip.log` in that person's private folder.
 
 Cron runs `submit.sh` with a much smaller environment than your login shell
-(no `module load slurm`, a minimal `PATH`, `SHELL=/bin/sh`), and `sbatch`
+(no `module` command, a minimal `PATH`, `SHELL=/bin/sh`), and `sbatch`
 passes that environment on to the job, so a run that works by hand can still
-fail under cron. To try it the way cron runs it, on `sdfcron001`:
+fail under cron. `submit.sh` sets up `module` itself and runs
+`module load slurm`, the same thing login shells do. To try it the way cron
+runs it, on `sdfcron001`:
 
 ```bash
-env -i HOME=$HOME SHELL=/bin/sh PATH=/sbin:/bin:/usr/sbin:/usr/bin \
+env -i HOME=$HOME LOGNAME=$USER USER=$USER SHELL=/bin/sh PATH=/sbin:/bin:/usr/sbin:/usr/bin \
     /sdf/data/rubin/user/$USER/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 ```
 
@@ -398,6 +400,14 @@ Things this means for interpreting results:
   the per-partition counts.
 - **The Dask cluster is shared across tests** in a session, so a test can
   benefit from data an earlier test already read.
+- **The catalog grows every day.** The benchmarks read the daily-updated
+  `rubin_alert_archive_v2/working` catalog, so timings change with the data
+  as well as the code. Until November 2026 they read the frozen
+  `rubin_alert_archive` catalog, which has fewer rows and smaller partitions,
+  so results from before and after the switch aren't comparable.
+- **Don't run them during a daily pipeline run.** The daily run adds files to
+  `working/` as it goes, so a benchmark running at the same time can read a
+  half-written file or see different data from one round to the next.
 
 ## Known issues
 
