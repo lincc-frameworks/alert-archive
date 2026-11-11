@@ -48,6 +48,20 @@
 # the last line makes bash read the whole body before running any of it.
 
 main() {
+    # Load Slurm's commands (sbatch) the way S3DF login shells do: their
+    # /etc/profile.d/slurm.sh runs `module load slurm`. Cron starts a plain,
+    # non-login shell, which skips /etc/profile.d, so two things are missing:
+    # the `module` command itself (modules.sh) and the S3DF modulefile
+    # directory that holds the slurm module (01-modulepath.sh). Set up just
+    # those two, not the whole login environment, since sbatch copies this
+    # shell's environment into the job. Done before `set -u` below, as
+    # these site scripts read variables that may be unset.
+    # shellcheck source=/dev/null
+    source /etc/profile.d/modules.sh
+    # shellcheck source=/dev/null
+    source /etc/profile.d/01-modulepath.sh
+    module load slurm
+
     # Stop at the first failing command (-e), treat unset variables as errors
     # (-u), and count a pipeline as failed if any part of it fails (pipefail).
     set -euo pipefail
@@ -56,14 +70,6 @@ main() {
     # and venv in particular). Writes to the shared folder below opt in to
     # group write explicitly.
     umask 0022
-
-    # Cron runs this with a minimal PATH (/sbin:/bin:/usr/sbin:/usr/bin, from
-    # /etc/crontab). Login shells on S3DF add Slurm's commands via
-    # /etc/profile.d/slurm.sh (`module load slurm`), but cron skips that, so
-    # sbatch isn't found. Add Slurm's bin directory when it's missing.
-    if ! command -v sbatch > /dev/null; then
-        PATH=/opt/slurm/slurm-curr/bin:$PATH
-    fi
 
     local user
     user=$(id -un)
