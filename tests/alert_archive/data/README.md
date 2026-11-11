@@ -30,7 +30,7 @@ pq.write_table(table, "alert_sample.parquet", compression="zstd", row_group_size
 
 ## Raw Avro alerts
 
-`avro_alerts/` holds three real alerts, each in a different alert format,
+`avro_alerts/` holds four real alerts, each in a different alert format,
 copied unchanged from the raw archive on S3DF. Like the archive, it has
 one gzipped Avro message per alert, at `<subdir>/<diaSourceId>.avro.gz`:
 
@@ -39,6 +39,7 @@ one gzipped Avro message per alert, at `<subdir>/<diaSourceId>.avro.gz`:
 | `170019` | `170019695985952427.avro.gz` | 1000 |
 | `170450` | `170450700567839112.avro.gz` | 1100 |
 | `171167` | `171167627158226197.avro.gz` | 1101 |
+| `171194` | `171194007958847495.avro.gz` | 1102 |
 
 The converter's tests read them in place, and copy the directory to use as a
 small archive.

@@ -22,17 +22,18 @@ def raw_alerts(alert_sample_pq_path):
 
 @pytest.fixture
 def avro_alert_files() -> list[Path]:
-    """The Avro sample alerts, of formats 1000, 1100 and 1101 (see data/README.md)."""
+    """The Avro sample alerts, of formats 1000, 1100, 1101 and 1102 (see data/README.md)."""
     return [
         DATA_DIR / "avro_alerts" / "170019" / "170019695985952427.avro.gz",
         DATA_DIR / "avro_alerts" / "170450" / "170450700567839112.avro.gz",
         DATA_DIR / "avro_alerts" / "171167" / "171167627158226197.avro.gz",
+        DATA_DIR / "avro_alerts" / "171194" / "171194007958847495.avro.gz",
     ]
 
 
 @pytest.fixture
 def avro_alerts(tmp_path) -> Path:
-    """A copy of the Avro sample alerts, as a raw archive: three subdirectories,
+    """A copy of the Avro sample alerts, as a raw archive: four subdirectories,
     one alert each."""
     return Path(
         shutil.copytree(
@@ -49,13 +50,14 @@ def avro_alerts_manifest(avro_alerts) -> dict:
     return {
         "archive": str(avro_alerts),
         "chunk_size": 50_000,
-        "n_subdirs": 3,
-        "n_files": 3,
-        "n_chunks": 3,
+        "n_subdirs": 4,
+        "n_files": 4,
+        "n_chunks": 4,
         "subdirs": [
             {"subdir": "170019", "n_files": 1},
             {"subdir": "170450", "n_files": 1},
             {"subdir": "171167", "n_files": 1},
+            {"subdir": "171194", "n_files": 1},
         ],
         "chunks": [
             {
@@ -75,6 +77,12 @@ def avro_alerts_manifest(avro_alerts) -> dict:
                 "start": 0,
                 "end": 1,
                 "out_name": "171167__00000000-00000001.parquet",
+            },
+            {
+                "subdir": "171194",
+                "start": 0,
+                "end": 1,
+                "out_name": "171194__00000000-00000001.parquet",
             },
         ],
     }
