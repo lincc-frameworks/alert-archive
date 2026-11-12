@@ -1,5 +1,6 @@
 import hats
 import lsdb
+import nested_pandas as npd
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -285,6 +286,28 @@ def test_write_partitions_casts_field_order(base_dir):
         assert table.schema == expected
         # Values follow their field names, not their old positions.
         assert table["s"][0].as_py() == {"b": "x", "a": 1.0}
+
+
+def test_write_partitions_accepts_nested_columns(base_dir):
+    """New alerts with a nested column pass the schema check when the catalog has the same column.
+
+    Nested columns are stored as a struct of lists. The check must compare them in that form,
+    not as the list of structs some lsdb schemas report.
+    """
+    common = paths.get_common_metadata_pointer(base_dir)
+    expected = pq.read_schema(common).append(pa.field("src", pa.struct([("x", pa.list_(pa.float64()))])))
+    pq.write_metadata(expected, common)
+
+    def add_nested(df):
+        nested = pd.DataFrame({"x": np.ones(2 * len(df))}, index=np.repeat(df.index, 2))
+        return npd.NestedFrame(df).join_nested(nested, "src")
+
+    catalog = make_catalog(1000, 100, (45, 180), seed=1).map_partitions(add_nested)
+    write_partitions(catalog, base_catalog_dir=base_dir, parquet_name="run1.parquet")
+    files = list(base_dir.glob("dataset/**/run1.parquet"))
+    assert files
+    for path in files:
+        assert pq.ParquetFile(path).schema_arrow.field("src").type == expected.field("src").type
 
 
 def test_update_metadata_mixed_schemas_keeps_counts(base_dir):
