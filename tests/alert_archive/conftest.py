@@ -5,10 +5,9 @@ from pathlib import Path
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
-from dask.distributed import Client
-
 from alert_archive.baseline import BaselinePipeline
 from alert_archive.config import PathConfig, get_default_config
+from dask.distributed import Client
 
 DATA_DIR = Path(__file__).parent / "data"
 
