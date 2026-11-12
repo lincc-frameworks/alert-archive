@@ -87,7 +87,7 @@ lf-bench's `--lbench-root <dir>` option does the same as `LBENCH_ROOT`.
 
 ## Nightly runs
 
-Every night at 03:17 Pacific, cron on `sdfcron001` (the only S3DF node where
+Every day at 06:17 Pacific, after the daily pipeline run, cron on `sdfcron001` (the only S3DF node where
 user cron jobs are allowed) runs `nightly/submit.sh`, which:
 
 1. resets the job's own clone of this repo to `origin/main`, so only merged
@@ -141,7 +141,7 @@ for the private and shared folders:
 
 ```mermaid
 flowchart TD
-    cron["cron on sdfcron001<br/>(owner's crontab, 03:17)"]
+    cron["cron on sdfcron001<br/>(owner's crontab, 06:17)"]
     person["someone, by hand<br/>(branch test)"]
     submit["submit.sh<br/>(runs on sdfcron001)"]
     slurm["Slurm queue<br/>(whole milano node, preemptable)"]
@@ -175,7 +175,7 @@ flowchart TD
     data -- "reads" --> job
     job -- "JSON, Dask reports,<br/>versions.txt" --> results
     job -. "job output" .-> logs
-    results -- "rsync (daily at 05:00)" --> viz
+    results -- "rsync (daily at 08:00)" --> viz
 ```
 
 Solid arrows are the main flow; dotted arrows are logs. Everything in `base`
@@ -225,12 +225,14 @@ logged just above it. Each line names who ran it; for install errors, check
 `pip.log` in that person's private folder.
 
 Cron runs `submit.sh` with a much smaller environment than your login shell
-(no `module load slurm`, a minimal `PATH`, `SHELL=/bin/sh`), and `sbatch`
+(no `module` command, a minimal `PATH`, `SHELL=/bin/sh`), and `sbatch`
 passes that environment on to the job, so a run that works by hand can still
-fail under cron. To try it the way cron runs it, on `sdfcron001`:
+fail under cron. `submit.sh` sets up `module` itself and runs
+`module load slurm`, the same thing login shells do. To try it the way cron
+runs it, on `sdfcron001`:
 
 ```bash
-env -i HOME=$HOME SHELL=/bin/sh PATH=/sbin:/bin:/usr/sbin:/usr/bin \
+env -i HOME=$HOME LOGNAME=$USER USER=$USER SHELL=/bin/sh PATH=/sbin:/bin:/usr/sbin:/usr/bin \
     /sdf/data/rubin/user/$USER/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
 ```
 
@@ -241,11 +243,11 @@ This submits a real job, so check its `.out` file in `logs/` afterwards too.
 [alert-dashboard.lsdb.io](https://alert-dashboard.lsdb.io) runs the
 [lsdb-benchmarking dashboard](https://github.com/lincc-frameworks/lsdb-benchmarking)
 on a machine at CMU (lsdb.phys.cmu.edu). A second cron job copies the nightly
-results there every day at 05:00 Pacific, from a crontab on `sdfcron001`.
+results there every day at 08:00 Pacific, from a crontab on `sdfcron001`.
 Current owner: Sandro (`stavar`).
 
 ```bash
-0 5 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
+0 8 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
 ```
 
 Cron runs `nightly/rsync-bench.sh` from the owner's clone of this repo. The
@@ -256,8 +258,8 @@ folder into a volume mounted on the dashboard's Docker container.
 - **What lands in `results/` gets published.** Only the results for main
   get copied. Do not include sensitive information in this folder, as its
   contents will be made public.
-- **New runs show up the morning after.** 05:00 leaves time for the run
-  submitted at 03:17 to finish. If a run takes longer, it will be published
+- **New runs show up the same morning.** 08:00 leaves time for the run
+  submitted at 06:17 to finish. If a run takes longer, it will be published
   the next day. The dashboard rereads the results on every page load, so
   nothing needs restarting on the server.
 
@@ -298,7 +300,7 @@ To take over:
 3. **Add your own cron entry** with `crontab -e` on `sdfcron001`, pointing
    at the clone the first run created (`<you>` is your username):
    ```
-   17 3 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
+   17 6 * * * /sdf/data/rubin/user/<you>/rubin_alert_archive_benchmarks/alert-archive/benchmarks/nightly/submit.sh
    ```
 4. **Update the repo** in a PR: (1) the owner named in this section, and (2) the
    `--mail-user` address at the top of `nightly/run.sbatch`, which gets an
@@ -330,7 +332,7 @@ To take over the rsync of results to the dashboard:
    ```
 5. **Add your own cron entry** with `crontab -e` on `sdfcron001`:
    ```bash
-   0 5 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
+   0 8 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
    ```
 
 ## Reading results
@@ -398,6 +400,14 @@ Things this means for interpreting results:
   the per-partition counts.
 - **The Dask cluster is shared across tests** in a session, so a test can
   benefit from data an earlier test already read.
+- **The catalog grows every day.** The benchmarks read the daily-updated
+  `rubin_alert_archive_v2/working` catalog, so timings change with the data
+  as well as the code. Until November 2026 they read the frozen
+  `rubin_alert_archive` catalog, which has fewer rows and smaller partitions,
+  so results from before and after the switch aren't comparable.
+- **Don't run them during a daily pipeline run.** The daily run adds files to
+  `working/` as it goes, so a benchmark running at the same time can read a
+  half-written file or see different data from one round to the next.
 
 ## Known issues
 
