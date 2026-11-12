@@ -97,7 +97,7 @@ class WeeklyPipeline(Pipeline):
             update_metadata(hats.read_hats(source_dir))
 
             catalog_dir = build_version(
-                client, source_dir, collection_dir, version, self.config.import_config, tmp_dir
+                client, source_dir, collection_dir, version, self.config.import_config
             )
             check_reimport(source_dir, catalog_dir)
 
