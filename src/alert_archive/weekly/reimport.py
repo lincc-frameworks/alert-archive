@@ -35,7 +35,6 @@ def build_version(
     collection_dir: Path,
     version: str,
     import_config: ImportConfig,
-    tmp_dir: Path,
 ) -> Path:
     """Re-import a catalog as the collection ``<collection_dir>/<version>/``, and return its main catalog.
 
@@ -55,8 +54,7 @@ def build_version(
         output_artifact_name=name,
         npix_suffix="/",
         pixel_threshold=import_config.pixel_threshold,
-        tmp_dir=tmp_dir,
-        resume=False,  # tmp_dir is deleted on exit
+        resume=False,  # a failed run is redone from scratch
         simple_progress_bar=import_config.simple_progress_bar,
     )
     pipeline_with_client(import_args, client)
@@ -68,7 +66,6 @@ def build_version(
         CollectionArguments(
             output_path=collection_dir,
             output_artifact_name=version,
-            tmp_dir=tmp_dir,
             simple_progress_bar=import_config.simple_progress_bar,
         )
         .catalog(catalog_path=catalog_dir)
