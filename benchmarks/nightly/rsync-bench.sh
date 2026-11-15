@@ -4,9 +4,9 @@
 #
 # Crontab line (run `crontab -e` on sdfcron001):
 #
-#   0 5 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
+#   0 8 * * * $HOME/alert-archive/benchmarks/nightly/rsync-bench.sh
 #
-# Runs at 05:00 Pacific, leaving time for the benchmarks submitted at 03:17 to finish.
+# Runs at 08:00 Pacific, leaving time for the benchmarks submitted at 06:17 to finish.
 set -uo pipefail
 
 # The log file will be readable by everyone and writable by the group.

@@ -30,6 +30,20 @@ set -o pipefail
 umask 0002
 export PYTHONDONTWRITEBYTECODE=1
 
+# The benchmarks read the working catalog, which the daily pipeline run
+# updates in place, writing new files into it as it goes. Reading it mid-run
+# could hit a half-written file, or see the data change between timed rounds.
+# The daily run holds this lock file while it runs, so if it's there, skip the
+# night. This only checks at the start: a daily run that starts later can
+# still overlap, which the schedule (see submit.sh) is meant to prevent.
+# Exits non-zero so the skip shows up as FAILED in sacct and in Slurm's email.
+pipeline_lock=/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/state/lock
+if [[ -e $pipeline_lock ]]; then
+    echo "skipped: the daily pipeline run holds $pipeline_lock:" >&2
+    cat "$pipeline_lock" >&2
+    exit 75
+fi
+
 base=$1
 repo=$base/alert-archive
 results=$3

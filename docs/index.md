@@ -32,12 +32,11 @@ catalog/data_quirks
 :maxdepth: 1
 
 pipeline/overview
-pipeline/baseline
 pipeline/daily_run
-pipeline/replay
 pipeline/state_and_notifications
 pipeline/runbook
 pipeline/known_issues
+pipeline/first_build
 ```
 
 ```{toctree}

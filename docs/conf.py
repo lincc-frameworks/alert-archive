@@ -36,6 +36,11 @@ extensions.append("sphinxcontrib.mermaid")
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 ## Render ```mermaid fences as diagrams, so the same Markdown works on GitHub and here.
 myst_fence_as_directive = ["mermaid"]
+## The RTD theme has no dark mode, so use Mermaid's light theme even when the
+## reader's OS is in dark mode (the extension follows the OS by default).
+mermaid_dark_theme = "default"
+## Size each diagram to its content instead of the extension's fixed 500px height.
+mermaid_height = "auto"
 ## ::: fences for admonitions, and anchors for headings so pages can link to sections.
 myst_enable_extensions = ["colon_fence"]
 myst_heading_anchors = 3
