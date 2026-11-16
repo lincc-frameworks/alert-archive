@@ -17,8 +17,8 @@ from ..collection import (
     collection_versions,
     collections_dir,
     current_catalog_dir,
-    make_current,
     remove_versions,
+    set_current_version,
 )
 from ..config import DaskConfig, PathConfig, get_default_config
 from ..daily.increment import remove_orphan_files, update_metadata
@@ -102,7 +102,7 @@ class WeeklyPipeline(Pipeline):
             check_reimport(source_dir, catalog_dir)
 
             state.mark_consolidated(r.run_id for r in runs if not r.consolidated)
-            make_current(collection_dir, version)
+            set_current_version(collection_dir, version)
             logger.info("%s now points to version %s.", collection_dir, version)
             remove_versions(collection_dir, collection_versions(collection_dir) - {version, previous})
         return catalog_dir

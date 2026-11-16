@@ -13,10 +13,6 @@ paths prefixed by the version's directory::
         ├── rubin_alert_archive_<B>/          the daily runs write here
         ├── rubin_alert_archive_<B>_10arcs/
         └── rubin_alert_archive_<B>_diaSourceId/
-
-The first weekly re-import reads ``working/``, the baseline's plain catalog;
-later ones read the collection's current main catalog (see
-:func:`current_catalog_dir`).
 """
 
 import logging
@@ -43,32 +39,33 @@ def collections_dir(paths: PathConfig) -> Path:
 
 def current_catalog_dir(paths: PathConfig) -> Path:
     """The catalog the daily runs write to and the weekly re-import reads: ``working/`` until the
-    first re-import makes ``collections/``, then the collection's current main catalog."""
+    first re-import makes ``collections/``, then the collection's current main catalog.
+    """
     collections = collections_dir(paths)
     if not (collections / "collection.properties").exists():
         return paths.working_dir
     return collections / CollectionProperties.read_from_dir(collections).hats_primary_table_url
 
 
-def make_current(collection_dir: Path, version: str):
-    """Point the collection at a version, in one atomic write of its ``collection.properties``.
-
-    It's the version's own, with paths prefixed by ``<version>/``. Only that
-    version's margin and index are listed, so lsdb can't pair its main
-    catalog with another version's margin.
-    """
+def set_current_version(collection_dir: Path, version: str):
+    """Point the collection at a version, in one atomic write of its ``collection.properties``."""
     properties = CollectionProperties.read_from_dir(collection_dir / version)
-    properties = properties.model_copy(
+
+    def in_version(path: str) -> str:
+        return f"{version}/{path}"
+
+    current = properties.model_copy(
         update={
-            "name": CATALOG_NAME,
-            "hats_primary_table_url": f"{version}/{properties.hats_primary_table_url}",
-            "all_margins": [f"{version}/{m}" for m in properties.all_margins],
-            "default_margin": f"{version}/{properties.default_margin}",
-            "all_indexes": {k: f"{version}/{v}" for k, v in properties.all_indexes.items()},
+            "name": CATALOG_NAME,  # the version's own name is its ID
+            "hats_primary_table_url": in_version(properties.hats_primary_table_url),
+            "all_margins": [in_version(m) for m in properties.all_margins],
+            "default_margin": in_version(properties.default_margin),
+            "all_indexes": {field: in_version(d) for field, d in properties.all_indexes.items()},
         }
     )
-    # The key=value lines hats would write, written atomically.
-    text = "".join(f"{k}={v}\n" for k, v in properties.model_dump(by_alias=True, exclude_none=True).items())
+    # Not to_properties_file: users read this file, so it must be replaced atomically.
+    lines = current.model_dump(by_alias=True, exclude_none=True)
+    text = "".join(f"{key}={value}\n" for key, value in lines.items())
     write_atomic(collection_dir / "collection.properties", text)
 
 
