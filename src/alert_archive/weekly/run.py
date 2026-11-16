@@ -22,6 +22,7 @@ from ..collection import (
 )
 from ..config import DaskConfig, PathConfig, get_default_config
 from ..daily.increment import remove_orphan_files, update_metadata
+from ..notify import send_email, weekly_skipped_summary
 from ..pipeline import Pipeline
 from ..state import PipelineState, new_run_id
 from .reimport import build_version, check_reimport
@@ -42,8 +43,8 @@ class WeeklyPipeline(Pipeline):
         catalog (:func:`~alert_archive.collection.current_catalog_dir`). Holding
         the pipeline lock, it:
 
-        1. skips if the format-change flag is set, and refuses if the current
-           version is already today's;
+        1. skips, with an email, if the format-change flag is set, and refuses if
+           the current version is already today's;
         2. deletes orphaned daily files and rebuilds the metadata from disk, so
            orphans aren't merged and then ingested again, and files a re-ingest
            deleted aren't counted;
@@ -74,9 +75,12 @@ class WeeklyPipeline(Pipeline):
         """
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
+        # TODO: a failure is only reported by Slurm's job email. We could catch it here, email the
+        # exception and re-raise, as the replay does (or in Pipeline.execute, for every pipeline).
         with state.lock("weekly"):
-            if state.format_change() is not None:
-                logger.warning("The format-change flag is set; skipping the re-import until it's cleared.")
+            if flag := state.format_change():
+                logger.warning("Format-change flag set since %s; skipping the re-import.", flag["flagged_at"])
+                send_email(*weekly_skipped_summary(flag))
                 return None
 
             collection_dir = collections_dir(paths)
