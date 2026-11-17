@@ -11,11 +11,10 @@ memory until the next weekly re-import repartitions the catalog.
 
 **The margin catalog and `diaSourceId` index lag behind.** The weekly re-import
 builds them, so they miss the alerts added since: crossmatches can miss pairs
-that straddle a pixel boundary, and an ID lookup doesn't find those alerts. The
-collection's first version, moved in from `working/`, has neither.
+that straddle a pixel boundary, and an ID lookup doesn't find those alerts.
 
-**Readers can see a run in progress.** Users read the current version while
-daily runs write to it. During a run, a query can see some of the run's files but not
+**Readers can see a run in progress.** Users read the current version while daily runs
+write to it. During a run, a query can see some of the run's files but not
 others, or metadata that doesn't match the files yet. We accepted this to keep
 the pipeline simple. Snapshots would fix it if it ever causes real problems.
 

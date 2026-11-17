@@ -118,18 +118,10 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
 - **The weekly re-import** (`weekly/run.py`) re-imports the current version as a
   new version of `collections/`, named by its UTC date, so at most one a day.
   Each version is a collection of its own: the main catalog (at most 200k rows
-  per pixel), a 10 arcsec margin and a `diaSourceId` index. Holding the lock, it:
-  1. skips, with an email, if the format-change flag is set;
-  2. deletes orphaned files and rebuilds the metadata from disk;
-  3. re-imports and builds the margin and index (hats-import keeps the schema
-     and checks the row count);
-  4. marks the merged runs `consolidated`, before the swap, so none is
-     ingested twice;
-  5. points `collection.properties` at the new version, in one atomic write;
-  6. deletes every version but the new and previous ones.
-
-  If a step before 5 fails, the collection is unchanged and the next run
-  deletes the failed version.
+  per pixel), a 10 arcsec margin and a `diaSourceId` index. It marks the merged
+  runs `consolidated` before the swap, so none is ingested twice, then points
+  `collection.properties` at the new version in one atomic write and keeps only
+  the previous version. If it fails before the swap, the collection is unchanged.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
   - `ingested.jsonl`: one line per daily run, with the run ID, its start

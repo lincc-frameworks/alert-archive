@@ -110,10 +110,9 @@ under a running job, and it refuses to run if the collection already has a versi
 ## The weekly re-import failed
 
 Slurm emails you, and the job's log, `alert-archive-weekly.log` in the directory
-it was submitted from, says why. Users see no change:
-`collections/collection.properties` still points at the previous version,
-unless the job failed in its very last step, deleting old versions. Fix the
-cause and run it again:
+it was submitted from, says why. Unless only the final cleanup failed, users see
+no change: `collections/collection.properties` still points at the previous
+version. Fix the cause and run it again:
 
 ```bash
 sbatch scripts/weekly.sbatch

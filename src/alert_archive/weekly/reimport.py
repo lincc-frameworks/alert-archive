@@ -36,8 +36,8 @@ def build_version(
     the daily runs can add files to. hats-import then adds the margin and index
     and writes the version's ``collection.properties``.
 
-    hats-import writes the new collection with the schema of the existing catalog and
-    raises a ``ValueError`` unless it read as many rows as its metadata counts.
+    hats-import keeps ``source_dir``'s schema and raises a ``ValueError`` unless
+    it reads as many rows as ``source_dir``'s metadata counts.
     """
     name = f"{CATALOG_NAME}_{version}"
     logger.info("Re-importing %s as %s/%s...", source_dir, version, name)

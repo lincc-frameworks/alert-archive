@@ -10,7 +10,7 @@
 #
 #   0 8 * * 6 cd $HOME/alert-archive/scripts && sbatch weekly.sbatch
 #
-# Runs once every Saturday at 08:00 Pacific, after the increment daily run.
+# Runs once every Saturday at 08:00 Pacific, after the daily run.
 
 #SBATCH --job-name=alert-archive-weekly
 #SBATCH --account=rubin:default

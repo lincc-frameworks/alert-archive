@@ -112,8 +112,7 @@ def new_run_id(now: datetime | None = None, date_only: bool = False) -> str:
     now : datetime or None
         Time to use instead of the current time. Must be timezone-aware.
     date_only : bool
-        Return just the UTC date, e.g. ``"20261027"``. Versions of the
-        collection are named by it, so the weekly re-import runs at most once a day.
+        Return just the UTC date, e.g. ``"20261027"``, which names collection versions.
 
     Returns
     -------
@@ -294,10 +293,9 @@ class PipelineState:
         """Mark the runs a weekly re-import merged as :attr:`~RunRecord.consolidated`.
 
         :meth:`reingest_runs` then refuses them, even with ``missing_files_ok``,
-        which would ingest their alerts a second time. The weekly calls this
-        holding the lock, before the collection points at the merged catalog: a
-        run marked too early is only refused needlessly, but one merged and not
-        marked could be ingested twice. The log is rewritten atomically.
+        since re-ingesting would add their alerts a second time. Call it before
+        the collection points at the merged catalog: a run marked too early is
+        only refused needlessly, but one merged and not marked could be ingested twice.
 
         Raises
         ------

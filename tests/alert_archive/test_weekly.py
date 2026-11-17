@@ -138,7 +138,6 @@ def test_weekly_makes_new_version_current(config):
 
     catalog_dir = run_weekly(config, FIRST_WEEKLY)
 
-    # The new version is current: the daily runs write to it from now on.
     name = f"{CATALOG_NAME}_{FIRST_WEEKLY}"
     assert catalog_dir == collection_dir / FIRST_WEEKLY / name
     assert current_catalog_dir(paths) == catalog_dir
@@ -154,13 +153,11 @@ def test_weekly_makes_new_version_current(config):
     # It keeps the leaf directories the daily runs add files to.
     assert hats.read_hats(catalog_dir).catalog_info.npix_suffix == "/"
 
-    # Users open it through the collection, with its margin and index.
     catalog = lsdb.open_catalog(collection_dir)
     assert catalog.margin is not None
     daily_alert = alerts[INDEX_COLUMN][-1].as_py()  # the highest ID is a daily run's
     assert len(catalog.id_search(values={INDEX_COLUMN: daily_alert}).compute()) == 1
 
-    # Every run is now consolidated.
     assert all(run.consolidated for run in logged_runs(config).values())
 
 
@@ -197,12 +194,10 @@ def test_failed_weekly_changes_nothing(config, monkeypatch):
         with pytest.raises(RuntimeError, match="failed on purpose"):
             run_weekly(config, FIRST_WEEKLY)
 
-    # Nothing changed, apart from the failed version's directory.
     assert properties_file.read_bytes() == properties
     assert not logged_runs(config)[DAILY_RUN].consolidated
     assert collection_versions(collection_dir) == {ADOPTED, FIRST_WEEKLY}
 
-    # The retry replaces that directory and goes live.
     catalog_dir = run_weekly(config, FIRST_WEEKLY)
 
     assert current_catalog_dir(paths) == catalog_dir

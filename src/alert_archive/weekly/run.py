@@ -1,4 +1,4 @@
-"""Weekly re-import: rebalance the catalog and build a new collection.
+"""Weekly re-import: rebalance the catalog as a new version of the collection.
 
 The daily runs only add files to existing pixels, and the margin and index don't
 cover their alerts. Once a week, this re-imports the current catalog as a new
@@ -46,8 +46,7 @@ class WeeklyPipeline(Pipeline):
         1. skips, with an email, if the format-change flag is set, and refuses if
            the current version is already today's;
         2. deletes orphaned daily files and rebuilds the metadata from disk, so
-           orphans aren't merged and then ingested again, and files a re-ingest
-           deleted aren't counted;
+           the re-import neither merges orphans nor counts deleted files;
         3. re-imports into ``<version>/``, a collection with the margin and index
            (hats-import checks that no rows were lost);
         4. marks the merged runs consolidated;
@@ -90,7 +89,6 @@ class WeeklyPipeline(Pipeline):
                     f"{source_dir} is already today's version. Versions are named by their date, "
                     "so the re-import runs at most once a day."
                 )
-            # Clean leftovers of a failed run earlier today
             remove_versions(collection_dir, {version})
 
             runs = state.runs()

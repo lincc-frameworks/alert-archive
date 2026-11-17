@@ -55,23 +55,11 @@ def current_catalog_dir(paths: PathConfig) -> Path:
 
 
 def adopt_working(paths: PathConfig, version: str | None = None) -> Path:
-    """Move the baseline's ``working/`` catalog into ``collections/`` as its first version, once.
+    """Move ``working/`` into ``collections/`` as its first, current version, and return it.
 
-    The catalog is moved, not copied, to ``<version>/rubin_alert_archive_<version>/``,
-    and becomes current. It has no margin or index until the first weekly re-import.
-    It holds the pipeline lock, so no daily run writes to ``working/`` meanwhile.
-
-    Parameters
-    ----------
-    paths : PathConfig
-        The archive's paths.
-    version : str or None
-        The version's ID. Defaults to today's UTC date.
-
-    Returns
-    -------
-    pathlib.Path
-        The moved catalog.
+    It lands in ``<version>/rubin_alert_archive_<version>/`` (``version``
+    defaults to today's UTC date), with no margin or index until the next weekly
+    re-import. It holds the pipeline lock, so no daily run writes at the same time.
 
     Raises
     ------

@@ -38,13 +38,12 @@ supports, and adds their alerts to the collection's current version. Each run
 writes one new file into every catalog pixel it touches and updates the
 catalog's metadata. See [The daily run](daily_run.md).
 
-**The catalog.** Users read the collection in `collections/`, published as
-`/sdf/data/rubin/cosmicdata/lsdb/rubin_alert_archive`, a symlink, and at
+**The catalog.** Users read `collections/`, published as
+`/sdf/data/rubin/cosmicdata/lsdb/rubin_alert_archive` (a symlink) and at
 <http://slac.data.lsdb.io:10942/lsdb/rubin_alert_archive/>. Its
 `collection.properties` always points at the current version, so the symlink
-never changes. The baseline and replay built `working/`, which is moved into
-`collections/` once as its first version (see [Runbook](runbook.md)). Until
-then, the symlink points to `working/`.
+never changes. Until `working/` is moved in as the first version (see
+[Runbook](runbook.md)), the symlink points to `working/`.
 
 **Weekly re-import.** The daily runs never split a pixel, and the margin and
 `diaSourceId` index don't cover their alerts. Once a week, `scripts/weekly.sbatch`
