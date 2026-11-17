@@ -24,7 +24,7 @@ what's new. A real entry, with its chunk list shortened:
 | `num_rows` | How many alerts it wrote. |
 | `schema_id_counts` | Alerts per alert format, e.g. `1101`. |
 | `skipped` | Chunks it couldn't read, with the error. The next run retries them. |
-| `consolidated` | True if the run's alerts are in the consolidated `Npix=<pixel>.parquet` files rather than files of their own, as for the baseline import. |
+| `consolidated` | True if the run's alerts are in the consolidated `Npix=<pixel>.parquet` files rather than files of their own: the baseline import, and every run a weekly re-import has merged. |
 
 A run is added to the log only after its files are written, and the log is
 always replaced in one step, so a crash never leaves a half-written line. If a
@@ -36,10 +36,10 @@ deletes its files and ingests them again.
 The flag is set when this file exists. A run sets it when it finds alerts the
 catalog can't take as they are: an alert format ID it doesn't know, or fields
 that would have to be dropped, converted to another type, or emptied to fit the
-catalog's columns. From then on every daily run stops
-without ingesting anything until a person deletes it. The file records when
-the flag was first set, and each run that hit a format change since, with what
-changed:
+catalog's columns. From then on every daily run stops without ingesting
+anything, and the weekly re-import skips, until a person deletes it. The file
+records when the flag was first set, and each run that hit a format change
+since, with what changed:
 
 ```json
 {
@@ -81,6 +81,7 @@ but needs a look, or ❌ if it had problems.
 | `⚠️ daily <run_id>: stale lock taken over` | A killed job had left the lock behind. The run went ahead, and the email names the killed job. |
 | `❌ daily <run_id>: FORMAT CHANGE` | The run found a new alert format, ingested nothing and set the flag. |
 | `❌ daily: not run, format-change flag set since <time>` | The flag was already set, so the run did nothing. |
+| `❌ weekly: skipped, format-change flag set since <time>` | The flag was set, so the weekly re-import was skipped. Run it again once the flag is cleared. |
 
 If a run hits more than one of these, the subject lists them all and uses the
 most serious mark.

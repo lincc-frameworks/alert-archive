@@ -1,11 +1,17 @@
 #!/bin/bash
-# Re-import the catalog as a new version of <root>/collections/, with a margin and a
-# diaSourceId index. The first run reads <root>/working/:
+# Re-import the current version of <root>/collections/ as a new version, with a margin
+# and a diaSourceId index:
 #
 #   sbatch scripts/weekly.sbatch [root]
 #
-# To test without touching the real root, pass one holding copies of its working/ and state/.
+# To test without touching the real root, pass one holding copies of its collections/ and state/.
 #
+# Crontab line (run `crontab -e` on sdfcron001):
+#
+#   0 8 * * 6 cd $HOME/alert-archive/scripts && sbatch weekly.sbatch
+#
+# Runs once every Saturday at 08:00 Pacific, after the increment daily run.
+
 #SBATCH --job-name=alert-archive-weekly
 #SBATCH --account=rubin:default
 #SBATCH --partition=milano

@@ -7,17 +7,21 @@ Problems we know about and haven't fixed yet.
 **Pixels grow without splitting.** A daily run adds alerts to the catalog's
 existing pixels and never splits one, so busy pixels keep growing (the largest
 has over two million rows). Queries touching them get slower and use more
-memory. The weekly re-import will repartition the catalog; until it exists,
-fixing this means re-importing everything.
+memory until the next weekly re-import repartitions the catalog.
 
-**No margin catalog or `diaSourceId` index yet.** Crossmatches can miss pairs
-that straddle a pixel boundary, and looking up an alert by ID scans the whole
-catalog. The weekly re-import will build both.
+**The margin catalog and `diaSourceId` index lag behind.** The weekly re-import
+builds them, so they miss the alerts added since: crossmatches can miss pairs
+that straddle a pixel boundary, and an ID lookup doesn't find those alerts. The
+collection's first version, moved in from `working/`, has neither.
 
-**Readers can see a run in progress.** Users read `working/` while daily runs
-write to it. During a run, a query can see some of the run's files but not
+**Readers can see a run in progress.** Users read the current version while
+daily runs write to it. During a run, a query can see some of the run's files but not
 others, or metadata that doesn't match the files yet. We accepted this to keep
 the pipeline simple. Snapshots would fix it if it ever causes real problems.
+
+**The daily run still writes to `working/`.** It has to write to
+{py:func}`alert_archive.collection.current_catalog_dir` instead, starting when
+`working/` is moved into `collections/` (see [Runbook](runbook.md)).
 
 ## The converter
 
@@ -43,5 +47,5 @@ two, but has taken close to an hour
 any moment, with no chance to clean up. The next run recovers (it takes over
 the lock and redoes the killed run's chunks), but the alerts arrive a run late.
 
-**A crashed daily run sends no summary email.** Only Slurm's job email reports
-it.
+**A crashed daily run or weekly re-import sends no email of its own.** Only
+Slurm's job email reports it.

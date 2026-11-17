@@ -59,8 +59,8 @@ rm $ROOT/state/lock
 ## The format-change flag is set
 
 Both the email that set it and `state/format_change.json` say what changed. Daily
-runs stop until you clear the flag, and nothing from the new chunks has been
-written, so there's nothing to undo.
+runs stop, and the weekly re-import skips, until you clear the flag. Nothing from
+the new chunks has been written, so there's nothing to undo.
 
 1. Teach the catalog the new format: add its schema to
    `src/alert_archive/schemas/` and update {py:mod}`alert_archive.schema`.
@@ -73,7 +73,8 @@ written, so there's nothing to undo.
    rm $ROOT/state/format_change.json
    ```
 
-The next daily run ingests the chunks that were waiting.
+The next daily run ingests the chunks that were waiting. If a weekly re-import
+was skipped meanwhile, start it again with `sbatch scripts/weekly.sbatch`.
 
 ## Chunks keep getting skipped
 
@@ -83,6 +84,45 @@ until someone renames or removes it. For a chunk whose footer can't be read,
 the file is probably damaged or still being written: ask whoever runs the
 converter to rewrite it. The next run picks it up.
 
+## Moving `working/` into `collections/` (once)
+
+The catalog the baseline and replay built, `working/`, becomes the collection's
+first version, without a margin or index until the next weekly re-import. Daily
+runs fail between the two steps, so do both before the next one:
+
+1. Switch the daily run to write to
+   {py:func}`alert_archive.collection.current_catalog_dir` instead of `working/`
+   (see [Known issues](known_issues.md)).
+2. Move `working/` in and repoint the symlink:
+
+   ```bash
+   python -c "
+   from alert_archive.collection import adopt_working
+   from alert_archive.config import PathConfig
+   print(adopt_working(PathConfig(root='$ROOT')))
+   "
+   ln -sfn $ROOT/collections /sdf/data/rubin/cosmicdata/lsdb/rubin_alert_archive
+   ```
+
+`adopt_working` takes the pipeline lock, so it fails rather than move `working/`
+under a running job, and it refuses to run if the collection already has a version.
+
+## The weekly re-import failed
+
+Slurm emails you, and the job's log, `alert-archive-weekly.log` in the directory
+it was submitted from, says why. Users see no change:
+`collections/collection.properties` still points at the previous version,
+unless the job failed in its very last step, deleting old versions. Fix the
+cause and run it again:
+
+```bash
+sbatch scripts/weekly.sbatch
+```
+
+It first deletes what the failed run left behind, so retrying the same day is
+fine. If it refuses because the current version is already today's, today's
+re-import succeeded. A killed job may also have left the lock behind (see above).
+
 ## A run wrote bad data
 
 If you've fixed a bug and want to redo some runs, take them off the log. This
@@ -91,11 +131,15 @@ chunks again:
 
 ```bash
 python -c "
+from alert_archive.collection import current_catalog_dir
+from alert_archive.config import PathConfig
 from alert_archive.state import PipelineState
-PipelineState('$ROOT/state').reingest_runs('$ROOT/working', ['<run_id>', ...])
+catalog_dir = current_catalog_dir(PathConfig(root='$ROOT'))
+PipelineState('$ROOT/state').reingest_runs(catalog_dir, ['<run_id>', ...])
 "
 ```
 
 It refuses runs whose alerts are in consolidated `Npix=<pixel>.parquet` files,
-such as the baseline import, since their alerts can't be deleted separately.
+such as the baseline import and every run a weekly re-import has merged, since
+their alerts can't be deleted separately.
 The catalog's metadata counts the deleted files until the next run rebuilds it.

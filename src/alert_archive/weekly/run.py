@@ -39,9 +39,9 @@ class WeeklyPipeline(Pipeline):
     def run(self, client: Client, tmp_dir: Path) -> Path | None:
         """Re-import the catalog as a new version and make it current.
 
-        It reads ``working/`` the first time, then the collection's current main
-        catalog (:func:`~alert_archive.collection.current_catalog_dir`). Holding
-        the pipeline lock, it:
+        It reads the collection's current main catalog
+        (:func:`~alert_archive.collection.current_catalog_dir`). Holding the
+        pipeline lock, it:
 
         1. skips, with an email, if the format-change flag is set, and refuses if
            the current version is already today's;
@@ -64,6 +64,8 @@ class WeeklyPipeline(Pipeline):
 
         Raises
         ------
+        FileNotFoundError
+            If the collection has no current version yet.
         ValueError
             If the current version is already today's, or hats-import didn't
             read as many rows as the catalog's metadata counts.
@@ -73,9 +75,6 @@ class WeeklyPipeline(Pipeline):
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
 
-        # A failure is only reported by Slurm's job email. We could catch it here, email the
-        # exception and re-raise, as the replay does. We could probably do it for every
-        # pipeline, in Pipeline.execute.
         with state.lock("weekly"):
             if flag := state.format_change():
                 logger.warning("Format-change flag set since %s; skipping the re-import.", flag["flagged_at"])
@@ -84,7 +83,7 @@ class WeeklyPipeline(Pipeline):
 
             collection_dir = collections_dir(paths)
             source_dir = current_catalog_dir(paths)
-            previous = None if source_dir == paths.working_dir else source_dir.parent.name
+            previous = source_dir.parent.name
             version = new_run_id(date_only=True)
             if version == previous:
                 raise ValueError(

@@ -112,15 +112,16 @@ the largest with 2.2 million alerts.
 ## Rebuilding from scratch
 
 You shouldn't need to, and it hasn't been done since the first build.
-Repartitioning will be the weekly re-import's job, not a rebuild's. If the
+Repartitioning is the weekly re-import's job, not a rebuild's. If the
 catalog ever has to be rebuilt from the dump:
 
-1. Move `working/` and `state/` aside. The baseline won't run while either has
-   anything in it.
-2. Run the baseline, then the replay. The replay's first run also ingests
-   every chunk the converter has written to `landing/`, since the new log
-   doesn't list them, so when the replay finishes the catalog is up to date.
+1. Move `state/` and `collections/` aside. The baseline won't run while `state/`
+   has anything in it.
+2. Run the baseline, move `working/` into `collections/` (see
+   [Runbook](runbook.md)), then run the replay. The replay's first run also
+   ingests every chunk the converter has written to `landing/`, since the new
+   log doesn't list them, so when the replay finishes the catalog is up to date.
 
-The `baseline_*` and `replay_*` directories next to `working/` are backups from
+The `baseline_*` and `replay_*` directories next to `collections/` are backups from
 the first build: the catalog and its state as each step left them.
 `replay_landing/` holds the dump chunks the replay copied.
