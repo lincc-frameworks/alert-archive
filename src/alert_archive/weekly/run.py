@@ -25,7 +25,7 @@ from ..daily.increment import remove_orphan_files, update_metadata
 from ..notify import send_email, weekly_skipped_summary
 from ..pipeline import Pipeline
 from ..state import PipelineState, new_run_id
-from .reimport import build_version, check_reimport
+from .reimport import build_version
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +48,13 @@ class WeeklyPipeline(Pipeline):
         2. deletes orphaned daily files and rebuilds the metadata from disk, so
            orphans aren't merged and then ingested again, and files a re-ingest
            deleted aren't counted;
-        3. re-imports into ``<version>/``, a collection with the margin and index;
-        4. checks the new catalog has the old one's row count and schema;
-        5. marks the merged runs consolidated;
-        6. points ``collection.properties`` at the new version, atomically;
-        7. deletes every version but the new and previous ones.
+        3. re-imports into ``<version>/``, a collection with the margin and index
+           (hats-import checks that no rows were lost);
+        4. marks the merged runs consolidated;
+        5. points ``collection.properties`` at the new version, atomically;
+        6. deletes every version but the new and previous ones.
 
-        If a step before 6 fails, the collection is unchanged, and the next
+        If a step before 5 fails, the collection is unchanged, and the next
         run (even a retry the same day) deletes the failed version's directory.
 
         Returns
@@ -65,13 +65,10 @@ class WeeklyPipeline(Pipeline):
         Raises
         ------
         ValueError
-            If the current version is already today's.
+            If the current version is already today's, or hats-import didn't
+            read as many rows as the catalog's metadata counts.
         alert_archive.state.LockHeldError
             If another job holds the pipeline lock.
-        alert_archive.weekly.reimport.ReimportCheckError
-            If the row counts differ.
-        alert_archive.daily.increment.SchemaMismatchError
-            If the schemas differ.
         """
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
@@ -103,7 +100,6 @@ class WeeklyPipeline(Pipeline):
             catalog_dir = build_version(
                 client, source_dir, collection_dir, version, self.config.import_config
             )
-            check_reimport(source_dir, catalog_dir)
 
             state.mark_consolidated(r.run_id for r in runs if not r.consolidated)
             set_current_version(collection_dir, version)
