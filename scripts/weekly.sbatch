@@ -15,7 +15,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=%x.log
 #SBATCH --open-mode=append
-#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=END,FAIL,TIME_LIMIT
 #SBATCH --mail-user=scampos@andrew.cmu.edu
 
 umask 002 # Files written by the script have group write permissions

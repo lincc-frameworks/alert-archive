@@ -29,8 +29,8 @@ from .reimport import build_version
 
 logger = logging.getLogger(__name__)
 
-WEEKLY_DASK = DaskConfig(n_workers=16, memory_limit="24GiB")
-"""Dask settings for the re-import, the same as the baseline's: a whole milano node."""
+WEEKLY_DASK = DaskConfig(n_workers=8, memory_limit="50GiB")
+"""Dask settings for the re-import, on a whole milano node: fewer, bigger workers than the baseline's."""
 
 
 class WeeklyPipeline(Pipeline):
@@ -72,8 +72,10 @@ class WeeklyPipeline(Pipeline):
         """
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
-        # TODO: a failure is only reported by Slurm's job email. We could catch it here, email the
-        # exception and re-raise, as the replay does (or in Pipeline.execute, for every pipeline).
+
+        # A failure is only reported by Slurm's job email. We could catch it here, email the
+        # exception and re-raise, as the replay does. We could probably do it for every
+        # pipeline, in Pipeline.execute.
         with state.lock("weekly"):
             if flag := state.format_change():
                 logger.warning("Format-change flag set since %s; skipping the re-import.", flag["flagged_at"])
@@ -82,7 +84,6 @@ class WeeklyPipeline(Pipeline):
 
             collection_dir = collections_dir(paths)
             source_dir = current_catalog_dir(paths)
-            # None on the first re-import, which reads working/.
             previous = None if source_dir == paths.working_dir else source_dir.parent.name
             version = new_run_id(date_only=True)
             if version == previous:
@@ -90,7 +91,7 @@ class WeeklyPipeline(Pipeline):
                     f"{source_dir} is already today's version. Versions are named by their date, "
                     "so the re-import runs at most once a day."
                 )
-            # clean leftovers of a failed run earlier today
+            # Clean leftovers of a failed run earlier today
             remove_versions(collection_dir, {version})
 
             runs = state.runs()
@@ -109,6 +110,7 @@ class WeeklyPipeline(Pipeline):
 
 
 def main(root=None):
-    """Run the re-import with :data:`WEEKLY_DASK`, on the archive under ``root`` (by default the real one)."""
+    """Run the re-import on the archive under ``root`` (by default the real one)."""
     paths = PathConfig() if root is None else PathConfig(root=root)
-    return WeeklyPipeline(get_default_config(paths=paths, dask=WEEKLY_DASK)).execute()
+    config = get_default_config(paths=paths, dask=WEEKLY_DASK)
+    return WeeklyPipeline(config).execute()

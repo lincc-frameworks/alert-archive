@@ -16,7 +16,7 @@ from ..config import ImportConfig
 logger = logging.getLogger(__name__)
 
 MARGIN_THRESHOLD = 10.0
-"""Width of the margin catalog, in arcseconds. The same as ppdb_hats' collections."""
+"""Width of the margin catalog, in arcseconds."""
 
 INDEX_COLUMN = "diaSourceId"
 """Column the index catalog is built on. Each alert has its own ``diaSourceId``."""
@@ -29,17 +29,15 @@ def build_version(
     version: str,
     import_config: ImportConfig,
 ) -> Path:
-    """Re-import a catalog as the collection ``<collection_dir>/<version>/``, and return its main catalog.
+    """Re-import a catalog as a versioned collection, and return its main catalog.
 
     The main catalog, ``rubin_alert_archive_<version>``, is repartitioned to at
     most ``import_config.pixel_threshold`` rows per pixel, in leaf directories
     the daily runs can add files to. hats-import then adds the margin and index
     and writes the version's ``collection.properties``.
 
-    hats-import writes the new catalog with ``source_dir``'s schema and raises
-    a ``ValueError`` unless it read as many rows as ``source_dir``'s metadata
-    counts. So that metadata must match the files (see
-    :func:`~alert_archive.daily.increment.update_metadata`).
+    hats-import writes the new collection with the schema of the existing catalog and
+    raises a ``ValueError`` unless it read as many rows as its metadata counts.
     """
     name = f"{CATALOG_NAME}_{version}"
     logger.info("Re-importing %s as %s/%s...", source_dir, version, name)

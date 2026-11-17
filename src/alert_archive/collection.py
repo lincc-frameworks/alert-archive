@@ -1,4 +1,4 @@
-"""The ``collections/`` collection and its versions.
+"""The collections and their versions.
 
 Each version is a collection of its own, written by hats-import into a
 directory named by its ID, the UTC date it was made. The top-level
@@ -39,8 +39,7 @@ def collections_dir(paths: PathConfig) -> Path:
 
 def current_catalog_dir(paths: PathConfig) -> Path:
     """The catalog the daily runs write to and the weekly re-import reads: ``working/`` until the
-    first re-import makes ``collections/``, then the collection's current main catalog.
-    """
+    first re-import makes ``collections/``, then the collection's current main catalog."""
     collections = collections_dir(paths)
     if not (collections / "collection.properties").exists():
         return paths.working_dir
