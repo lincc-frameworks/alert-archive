@@ -34,22 +34,21 @@ of up to 50,000 alerts and writes them to `landing/`. More info coming soon!
 
 **Daily run.** This finds the chunks in `landing/`
 that no run has ingested yet, checks that their alert format is one the catalog
-supports, and adds their alerts to the collection's current version. Each run
-writes one new file into every catalog pixel it touches and updates the
-catalog's metadata. See [The daily run](daily_run.md).
+supports, and adds their alerts to the collection's current version. Each run writes one new file into
+every catalog pixel it touches and updates the catalog's metadata. See
+[The daily run](daily_run.md).
 
 **The catalog.** Users read `collections/`, published as
-`/sdf/data/rubin/cosmicdata/lsdb/rubin_alert_archive` (a symlink) and at
-<http://slac.data.lsdb.io:10942/lsdb/rubin_alert_archive/>. Its
+`/sdf/data/rubin/cosmicdata/lsdb/rubin_alert_archive` (a symlink)
+and at <http://slac.data.lsdb.io:10942/lsdb/rubin_alert_archive/>. Its
 `collection.properties` always points at the current version, so the symlink
-never changes. Until `working/` is moved in as the first version (see
-[Runbook](runbook.md)), the symlink points to `working/`.
+never changes.
 
 **Weekly re-import.** The daily runs never split a pixel, and the margin and
 `diaSourceId` index don't cover their alerts. Once a week, `scripts/weekly.sbatch`
 re-imports the current version, repartitioned and with a margin and index, as a
 new version named by its UTC date, and makes it current. The previous version is
-kept and opens on its own, e.g. `lsdb.open_catalog(".../collections/20261031")`.
+kept and opens on its own. e.g. `lsdb.open_catalog(".../rubin_alert_archive/20261031")`.
 See {py:mod}`alert_archive.weekly.run`.
 
 **Scheduling (coming soon).** For now, the daily and weekly runs are started by
@@ -78,12 +77,12 @@ rubin_alert_archive_v2/
 │   ├── format_change.json                    only while the format-change flag is set
 │   └── lock                                  only while a run is in progress
 └── collections/                              the HATS collection users read
-    ├── collection.properties                 points into the current version
+    ├── collection.properties                 points to the current version
     ├── 20261031/                             the previous version
     └── 20261107/                             the current version
         ├── collection.properties
         ├── rubin_alert_archive_20261107/     the main catalog, which the daily runs write to
-        │   ├── hats.properties, partition_info.csv, ...
+        │   ├── hats.properties, partition_info.csv, skymap.fits, ...
         │   └── dataset/Norder=<k>/Dir=<d>/Npix=<pixel>/
         │       ├── Npix=<pixel>.parquet      alerts from the re-import
         │       └── 20261108T225212Z.parquet  alerts from one daily run, named by its run ID
@@ -115,6 +114,6 @@ until we're fully confident in the live catalog.
 | {py:mod}`alert_archive.baseline` | The one-time baseline import |
 | {py:mod}`alert_archive.mock.replay` | The one-time replay of the Parquet dump |
 
-The Slurm scripts that run them are in `scripts/`: `daily.sbatch`,
-`weekly.sbatch`, `baseline.sbatch` and `replay.sbatch`. For why the pipeline is
-built this way, see the [design doc](../design/incremental_data_flow.md).
+The Slurm scripts that run them are in `scripts/`: `daily.sbatch`, `weekly.sbatch`,
+`baseline.sbatch` and `replay.sbatch`. For why the pipeline is built this way,
+see the [design doc](../design/incremental_data_flow.md).

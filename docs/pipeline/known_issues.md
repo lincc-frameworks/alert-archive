@@ -46,5 +46,5 @@ two, but has taken close to an hour
 any moment, with no chance to clean up. The next run recovers (it takes over
 the lock and redoes the killed run's chunks), but the alerts arrive a run late.
 
-**A crashed daily run or weekly re-import sends no email of its own.** Only
-Slurm's job email reports it.
+**A crashed daily run or weekly re-import sends no email of its own.** Only Slurm's job email reports
+it.

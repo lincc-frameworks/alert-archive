@@ -59,8 +59,8 @@ rm $ROOT/state/lock
 ## The format-change flag is set
 
 Both the email that set it and `state/format_change.json` say what changed. Daily
-runs stop, and the weekly re-import skips, until you clear the flag. Nothing from
-the new chunks has been written, so there's nothing to undo.
+runs stop, and the weekly re-import skips, until you clear the flag. Nothing from the new chunks has been
+written, so there's nothing to undo.
 
 1. Teach the catalog the new format: add its schema to
    `src/alert_archive/schemas/` and update {py:mod}`alert_archive.schema`.
@@ -110,9 +110,9 @@ under a running job, and it refuses to run if the collection already has a versi
 ## The weekly re-import failed
 
 Slurm emails you, and the job's log, `alert-archive-weekly.log` in the directory
-it was submitted from, says why. Unless only the final cleanup failed, users see
-no change: `collections/collection.properties` still points at the previous
-version. Fix the cause and run it again:
+it was submitted from, says why. Users see no change in this case: 
+`collections/collection.properties` still points at the previous version. Fix the
+cause and run it again:
 
 ```bash
 sbatch scripts/weekly.sbatch

@@ -36,10 +36,10 @@ deletes its files and ingests them again.
 The flag is set when this file exists. A run sets it when it finds alerts the
 catalog can't take as they are: an alert format ID it doesn't know, or fields
 that would have to be dropped, converted to another type, or emptied to fit the
-catalog's columns. From then on every daily run stops without ingesting
-anything, and the weekly re-import skips, until a person deletes it. The file
-records when the flag was first set, and each run that hit a format change
-since, with what changed:
+catalog's columns. From then on every daily run stops
+without ingesting anything until a person deletes it. The file records when
+the flag was first set, and each run that hit a format change since, with what
+changed:
 
 ```json
 {
