@@ -42,7 +42,7 @@ flowchart TD
     subgraph WEEKLY["Weekly re-import, Saturday (lsdb#1536)"]
         W0{"Format-change<br/>flag set?"}
         W1["Merge each leaf dir's nightly files,<br/>rebalance, rebuild margin + diaSourceId index"]
-        W2["Validate: row counts and<br/>per-object source counts"]
+        W2["hats-import validates<br/>the row count"]
         W3["Atomic promote<br/>(keep the previous version for rollback)"]
         SKIP["Skip this week + email"]
         W0 -->|no| W1 --> W2 --> W3
@@ -90,8 +90,7 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   The frozen catalog, as rebuilt on 2026-10-20, holds exactly those
   16.5M alerts, so after the replay both catalogs should have the same alerts.
 - **Location:** `/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2/`,
-  holding a `working/` catalog plus the published versions that lsdb#1536
-  needs for promote and rollback.
+  holding `collections/`, the collection users read and the pipeline writes to.
 - **The baseline** (`baseline.py`) imports the 263 Jun 26 chunks with 6-digit
   prefixes (10.77M alerts) into an empty `working/` with hats-import. They are
   picked by name: all of them sort before every later chunk, up to
@@ -113,6 +112,16 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   consolidated file, written by the baseline and later by each weekly
   re-import, keeps hats-import's default name `Npix=<pixel>.parquet`. Each
   daily run adds a `<run_id>.parquet` next to it.
+- **The collection's first version** is the baseline's `working/`, moved in once
+  by `collection.adopt_working`, without a margin or index. From then on, the
+  daily run and the weekly re-import only use the collection's current version.
+- **The weekly re-import** (`weekly/run.py`) re-imports the current version as a
+  new version of `collections/`, named by its UTC date, so at most one a day.
+  Each version is a collection of its own: the main catalog (at most 200k rows
+  per pixel), a 10 arcsec margin and a `diaSourceId` index. It marks the merged
+  runs `consolidated` before the swap, so none is ingested twice, then points
+  `collection.properties` at the new version in one atomic write and keeps only
+  the previous version. If it fails before the swap, the collection is unchanged.
 - **Pipeline state** lives in `rubin_alert_archive_v2/state/`, outside the
   catalog so it survives the weekly re-import:
   - `ingested.jsonl`: one line per daily run, with the run ID, its start
@@ -125,9 +134,9 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
     Re-ingesting a run (`PipelineState.reingest_runs`) deletes its files and
     takes it off the log, e.g. to redo runs that wrote bad data after a bug
     fix. The skymaps and metadata still count those files until the next
-    daily run rebuilds them from disk. The baseline's run is marked
-    `consolidated` (its alerts are in the `Npix=<pixel>.parquet` files), so
-    re-ingesting it is always refused.
+    daily run rebuilds them from disk. The baseline's run and every run a
+    weekly re-import merges are marked `consolidated` (their alerts are in the
+    `Npix=<pixel>.parquet` files), so re-ingesting them is refused.
   - `format_change.json`: present only while flagged. Its existence is the flag.
   - `lock`: an atomic lock file so the daily and weekly jobs never overlap.
     If a job dies without removing it, nothing breaks it automatically: the
@@ -159,7 +168,7 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   in the raw Avro alerts; the converter strips them before writing parquet,
   so nothing downstream can recover them. Revisit this when we port the
   converter, where we can choose to keep them. Adding them later changes
-  the catalog's columns, which needs a weekly re-import.
+  the catalog's columns, which needs a full re-import.
 - **Unknown alert formats stop the pipeline.** Users read the working catalog
   directly, so best-effort rows would reach them the same day. When a daily run
   finds an alert format it doesn't know, it writes nothing, sets the
@@ -304,17 +313,6 @@ schedule until step 9.
 | 5 | **Increment** | `daily/increment.py` from ppdb_hats with recompute-from-disk metadata, one-schema write check, orphan-file cleanup; `config.py`, `pipeline.py` | medium |
 | 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` (skipping the 5-digit duplicates; 200k-row partitions), logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
 | 7 | **Daily run + replay** | `daily/run.py` (incl. stop + flag + email on an unknown format, orphan cleanup at start), `mock/replay.py`, end-to-end test (baseline → replay one night) | medium |
-| 8 | **Weekly scaffold** | `weekly/run.py`: flag check, skip and email; merge itself deferred to lsdb#1536 | small |
+| 8 | **Weekly re-import** | `weekly/run.py`, `weekly/reimport.py`, `collection.py`: re-import into a new dated version of `collections/` with margin and `diaSourceId` index, `mark_consolidated`, atomic swap, keep the previous version; `collection.adopt_working` to move `working/` in once; `scripts/weekly.sbatch` | medium |
 | 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
 | 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |
-
-**TODO (step 8, with the merge in lsdb#1536):** the weekly re-import should
-mark each daily run it merges as `consolidated` in the ingested log, e.g. with
-a `PipelineState.mark_consolidated(run_ids)` that rewrites the log atomically
-under the weekly lock. Once merged, a run's alerts are in the
-`Npix=<pixel>.parquet` files like the baseline's, and without the mark only the
-`FileNotFoundError` in `reingest_runs` stops a re-ingest, which
-`missing_files_ok=True` gets past. Mark the runs before the merged catalog
-replaces `working/`, not after: a run marked but not yet merged is only
-refused when it didn't need to be, while one merged but not yet marked can
-be ingested twice. Mark only the runs whose files were in the merge.
