@@ -6,7 +6,7 @@ import pytest
 from alert_archive.daily import run as daily
 from alert_archive.daily.increment import leaf_files
 from alert_archive.daily.run import DailyPipeline, check_formats, find_new_chunks, main
-from alert_archive.state import PipelineState, RunRecord
+from alert_archive.state import LockHeldError, PipelineState, RunRecord
 from conftest import BASELINE_CHUNK_NAMES, shift_ids
 from dask.distributed import Client
 
@@ -135,6 +135,47 @@ def test_daily_removes_orphans(v2_config, landing, tmp_path):
     orphan.write_bytes(b"left by a crashed run")
     run_daily(v2_config, tmp_path, email=False)
     assert not orphan.exists()
+
+
+def test_daily_emails_errors(v2_config, landing, new_alerts, tmp_path, emails, monkeypatch):
+    """An error in the import is emailed, then raised, and the lock is released."""
+    pq.write_table(new_alerts, landing / NEW_CHUNK)
+
+    def broken_import(*args, **kwargs):
+        raise RuntimeError("worker died")
+
+    monkeypatch.setattr(daily, "import_increment", broken_import)
+    with pytest.raises(RuntimeError, match="worker died"):
+        run_daily(v2_config, tmp_path)
+
+    [(subject, body)] = emails
+    assert "FAILED, RuntimeError" in subject
+    assert "RuntimeError: worker died" in body and "broken_import" in body
+    state = PipelineState(v2_config.paths.state_dir)
+    assert not state.lock_path.exists()
+    assert len(state.runs()) == 1  # just the baseline
+
+
+def test_daily_emails_held_lock(v2_config, tmp_path, emails):
+    """A run that can't take the lock emails that too, and leaves the other job's lock alone."""
+    state = PipelineState(v2_config.paths.state_dir)
+    with state.lock("weekly"):
+        with pytest.raises(LockHeldError):
+            run_daily(v2_config, tmp_path)
+        assert state.lock_path.exists()
+    assert "FAILED, LockHeldError" in emails[0][0]
+
+
+def test_daily_failure_email_error_keeps_original(v2_config, tmp_path, monkeypatch):
+    """If the failure email can't be sent either, the run's own error is the one raised."""
+
+    def broken_mail(subject, body):
+        raise OSError("no mail")
+
+    monkeypatch.setattr(daily, "send_email", broken_mail)
+    PipelineState(v2_config.paths.state_dir).log_path.unlink()
+    with pytest.raises(FileNotFoundError, match="build the baseline first"):
+        run_daily(v2_config, tmp_path)
 
 
 def test_daily_needs_baseline(v2_config, tmp_path):

@@ -8,7 +8,7 @@
 #   sbatch --mail-user=<you@example.org> scripts/daily.sbatch
 #
 # The log, alert-archive-daily-<jobid>.log, lands in the repo root. The run
-# sends its own summary email, even when there's nothing new.
+# sends its own summary email, even when there's nothing new or it fails.
 # If the job is killed mid-run, it leaves state/lock behind; check that nothing
 # is running, delete the lock, then resubmit. Files from the interrupted run
 # are cleaned up automatically.

@@ -1,7 +1,14 @@
 import subprocess
 
 import pytest
-from alert_archive.notify import OK_MARK, PROBLEM_MARK, SUBJECT_PREFIX, daily_summary, send_email
+from alert_archive.notify import (
+    OK_MARK,
+    PROBLEM_MARK,
+    SUBJECT_PREFIX,
+    daily_failure_summary,
+    daily_summary,
+    send_email,
+)
 from alert_archive.state import RunRecord
 
 
@@ -81,3 +88,16 @@ def test_daily_summary_reports_problems():
     assert "diaSource.x" in body
     assert "new.parquet: truncated" in body
     assert "old.parquet (failing since t1): corrupt" in body
+
+
+def test_daily_failure_summary(monkeypatch):
+    """The failure email names the error, the Slurm log and has the traceback."""
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    try:
+        raise ValueError("bad pixel")
+    except ValueError as exc:
+        subject, body = daily_failure_summary(exc)
+    assert subject == f"{PROBLEM_MARK} daily: FAILED, ValueError"
+    assert "ValueError: bad pixel" in body
+    assert "alert-archive-daily-123.log" in body
+    assert "TRACEBACK" in body and "test_daily_failure_summary" in body

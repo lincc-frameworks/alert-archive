@@ -122,7 +122,7 @@ class ReplayPipeline(Pipeline):
             if email:
                 try:
                     send_email(*replay_summary(records, stopped))
-                except Exception:  # noqa: BLE001 - don't hide the original error
+                except Exception:  # don't hide the original error
                     logger.exception("Couldn't send the replay email")
             raise
 

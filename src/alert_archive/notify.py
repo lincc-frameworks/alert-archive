@@ -6,6 +6,7 @@ builds it and :func:`send_email` sends it with the ``mail`` command.
 
 import os
 import subprocess
+import traceback
 
 from .state import RunRecord
 
@@ -148,3 +149,28 @@ def flag_set_summary(flag: dict) -> tuple[str, str]:
         *(f"  {run['run_id']} ({run['time']}): {run['details']}" for run in flag["runs"]),
     ]
     return subject, "\n".join(lines) + "\n"
+
+
+def daily_failure_summary(exc: BaseException) -> tuple[str, str]:
+    """Build the email for a daily run that raised an error.
+
+    Parameters
+    ----------
+    exc : BaseException
+        The error.
+
+    Returns
+    -------
+    tuple[str, str]
+        The subject and body.
+    """
+    subject = f"{PROBLEM_MARK} daily: FAILED, {type(exc).__name__}"
+    lines = [
+        f"The daily run stopped with an error: {type(exc).__name__}: {exc}",
+        "Nothing it ingested was logged, so the next run ingests those chunks again",
+        "and deletes any files this run left in the catalog.",
+    ]
+    if job_id := os.environ.get("SLURM_JOB_ID"):
+        lines.append(f"Slurm job {job_id}; log: alert-archive-daily-{job_id}.log")
+    lines += ["", "TRACEBACK", *traceback.format_exception(exc)]
+    return subject, "\n".join(line.rstrip("\n") for line in lines) + "\n"

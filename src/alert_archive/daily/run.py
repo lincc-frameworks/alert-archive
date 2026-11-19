@@ -15,8 +15,9 @@ Each run, while holding the pipeline lock:
    and rebuilds the skymaps and metadata from disk.
 6. Logs the run in ``ingested.jsonl`` and sends the summary email.
 
-A run with no new chunks is still logged and emailed, so a missing email
-means the run didn't happen.
+A run with no new chunks is still logged and emailed, and a run that raises
+emails the error before re-raising it, so a missing email means the run
+didn't happen.
 """
 
 import logging
@@ -34,7 +35,7 @@ from hats_import import pipeline_with_client
 from hats_import.catalog.arguments import ImportArguments
 
 from ..config import get_default_config
-from ..notify import daily_summary, flag_set_summary, send_email
+from ..notify import daily_failure_summary, daily_summary, flag_set_summary, send_email
 from ..pipeline import Pipeline
 from ..reader import AlertReader
 from ..schema import SCHEMA_ID_COLUMN, ConformReport, conform_alerts, infer_schema_id
@@ -84,64 +85,79 @@ class DailyPipeline(Pipeline):
             If the ingested log has no runs, i.e. the baseline hasn't been built.
         alert_archive.state.LockHeldError
             If another job holds the pipeline lock.
+        Exception
+            Whatever else goes wrong, e.g. in the import. Any error is emailed
+            (if ``email``) after the lock is released, then raised again.
         """
         paths = self.config.paths
         state = PipelineState(paths.state_dir)
 
-        with state.lock("daily"):
-            if flag := state.format_change():
-                logger.error("Format-change flag set since %s; not ingesting.", flag["flagged_at"])
-                if email:
-                    send_email(*flag_set_summary(flag))
-                return None
+        try:
+            with state.lock("daily"):
+                if flag := state.format_change():
+                    logger.error("Format-change flag set since %s; not ingesting.", flag["flagged_at"])
+                    if email:
+                        send_email(*flag_set_summary(flag))
+                    return None
 
-            runs = state.runs()
-            if not runs:
-                raise FileNotFoundError(f"{state.log_path} has no runs; build the baseline first")
-            remove_orphan_files(paths.working_dir, [r.file_name for r in runs if r.file_name])
+                runs = state.runs()
+                if not runs:
+                    raise FileNotFoundError(f"{state.log_path} has no runs; build the baseline first")
+                remove_orphan_files(paths.working_dir, [r.file_name for r in runs if r.file_name])
 
-            run_id = new_run_id()
-            started = datetime.now(UTC).isoformat()
-            chunks, skipped = find_new_chunks(paths.landing_dir, state.ingested_chunks())
-            reports, unreadable = check_formats(chunks)
-            skipped.update(unreadable)
-            chunks = [c for c in chunks if c.name in reports]
+                run_id = new_run_id()
+                started = datetime.now(UTC).isoformat()
+                chunks, skipped = find_new_chunks(paths.landing_dir, state.ingested_chunks())
+                reports, unreadable = check_formats(chunks)
+                skipped.update(unreadable)
+                chunks = [c for c in chunks if c.name in reports]
 
-            changes = {name: format_change_details(r) for name, r in reports.items() if r.is_format_change}
-            if changes:
-                logger.error("Format change in %d chunk(s); not ingesting: %s", len(changes), changes)
-                state.flag_format_change(run_id, changes)
-                if email:
-                    record = RunRecord(run_id=run_id, started=started, skipped=skipped)
-                    send_email(*daily_summary(record, state.failing_chunks(), format_change=changes))
-                return None
+                changes = {
+                    name: format_change_details(r) for name, r in reports.items() if r.is_format_change
+                }
+                if changes:
+                    logger.error("Format change in %d chunk(s); not ingesting: %s", len(changes), changes)
+                    state.flag_format_change(run_id, changes)
+                    if email:
+                        record = RunRecord(run_id=run_id, started=started, skipped=skipped)
+                        send_email(*daily_summary(record, state.failing_chunks(), format_change=changes))
+                    return None
 
-            num_rows = 0
-            if chunks:
-                logger.info("Ingesting %d chunks as run %s...", len(chunks), run_id)
-                increment = import_increment(
-                    client, chunks, paths.working_dir, tmp_dir, self.config.import_config
+                num_rows = 0
+                if chunks:
+                    logger.info("Ingesting %d chunks as run %s...", len(chunks), run_id)
+                    increment = import_increment(
+                        client, chunks, paths.working_dir, tmp_dir, self.config.import_config
+                    )
+                    rows = write_partitions(
+                        increment, base_catalog_dir=paths.working_dir, parquet_name=f"{run_id}.parquet"
+                    )
+                    num_rows = sum(rows.values())
+                    working = hats.read_hats(paths.working_dir)
+                    update_skymaps(working)
+                    update_metadata(working)
+
+                schema_id_counts = Counter()
+                for report in reports.values():
+                    schema_id_counts.update(report.schema_ids)
+                record = RunRecord(
+                    run_id=run_id,
+                    started=started,
+                    chunks=[c.name for c in chunks],
+                    num_rows=num_rows,
+                    schema_id_counts=dict(schema_id_counts),
+                    skipped=skipped,
                 )
-                rows = write_partitions(
-                    increment, base_catalog_dir=paths.working_dir, parquet_name=f"{run_id}.parquet"
-                )
-                num_rows = sum(rows.values())
-                working = hats.read_hats(paths.working_dir)
-                update_skymaps(working)
-                update_metadata(working)
+                state.append_run(record)
 
-            schema_id_counts = Counter()
-            for report in reports.values():
-                schema_id_counts.update(report.schema_ids)
-            record = RunRecord(
-                run_id=run_id,
-                started=started,
-                chunks=[c.name for c in chunks],
-                num_rows=num_rows,
-                schema_id_counts=dict(schema_id_counts),
-                skipped=skipped,
-            )
-            state.append_run(record)
+        except Exception as exc:
+            # Slurm's failure mail only reaches whoever submitted the job, so tell the usual recipients too.
+            if email:
+                try:
+                    send_email(*daily_failure_summary(exc))
+                except Exception:  # don't hide the original error
+                    logger.exception("Couldn't send the failure email")
+            raise
 
         logger.info("Run %s complete: %d alerts from %d chunks.", run_id, num_rows, len(chunks))
         if email:
