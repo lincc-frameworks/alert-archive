@@ -37,7 +37,9 @@ never write to the catalog at once. The run:
    per format and skipped chunks.
 8. **Emails the summary**, after releasing the lock: how many alerts it
    ingested, from which chunks, and any problems. A run with nothing new is
-   still logged and emailed, so **no email means no run**.
+   still logged and emailed. A run that stops with an error (e.g. the lock is
+   held, or the import fails) emails the error and its traceback instead, so
+   **no email means no run**.
 
 The run ID is the run's start time in UTC, like `20261102T225212Z`.
 
