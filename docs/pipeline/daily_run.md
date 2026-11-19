@@ -18,7 +18,10 @@ never write to the catalog at once. The run:
    safe, it only deletes leftovers that look like one crashed run's files: all
    named after the same run ID, newer than every logged run. Anything else
    (e.g. a hand-copied file) stops the run with an error, and nothing is
-   deleted.
+   deleted. It also deletes the chunks in `landing/` that a run ingested more
+   than a week ago, so `landing/` doesn't keep growing. A week leaves time to
+   re-ingest a recent run (see [Runbook](runbook.md)). Skipped and misnamed
+   chunks are never deleted.
 3. **Finds new chunks.** These are the files in `landing/` that aren't in any
    logged run. A chunk is skipped if its name isn't
    `<6-digit prefix>__<first>-<last>.parquet` or its footer can't be read.

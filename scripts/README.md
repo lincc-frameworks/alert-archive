@@ -27,6 +27,8 @@ landing/
 - **A subdirectory goes into the manifest once all its chunks are written**,
   and is never looked at again. Until then, each run tries it again, with the
   same files (from `chunk_lists/`), skipping the chunks already written.
+- **The daily run deletes chunks a week after ingesting them.** The manifest
+  still lists them, so they aren't converted again.
 
 ## Setup
 

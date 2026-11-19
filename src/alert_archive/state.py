@@ -178,7 +178,9 @@ class PipelineState:
             raise ValueError(f"run {record.run_id!r} is already in {self.log_path}")
         write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in [*runs, record]))
 
-    def reingest_runs(self, catalog_dir, run_ids, missing_files_ok: bool = False) -> list[RunRecord]:
+    def reingest_runs(
+        self, catalog_dir, run_ids, *, landing_dir, missing_files_ok: bool = False
+    ) -> list[RunRecord]:
         """Delete the catalog files that runs wrote and take the runs off the log.
 
         The next daily run then ingests their chunks again, into new files
@@ -188,6 +190,11 @@ class PipelineState:
         Only use this before the weekly re-import has merged the runs' files
         into the catalog. After that, there are no separate files to delete,
         and re-ingesting the chunks would add their alerts a second time.
+
+        The runs' chunks must still be in the landing dir, which keeps them
+        for a week after they're ingested
+        (:data:`~alert_archive.daily.run.LANDING_RETENTION`). Otherwise their
+        alerts would be deleted from the catalog and never come back.
 
         Every run is checked before anything is deleted. Files are deleted
         before the log is changed, so if this stops partway, the runs are
@@ -207,6 +214,8 @@ class PipelineState:
             The working catalog the runs wrote to.
         run_ids : iterable of str
             IDs of the runs to redo.
+        landing_dir : str or path-like
+            The landing dir the daily run reads the runs' chunks from again.
         missing_files_ok : bool
             If True, runs with no files left are taken off the log anyway.
             Use this only when you know the files were deleted rather than
@@ -227,13 +236,15 @@ class PipelineState:
             ``missing_files_ok``. Its alerts can't be deleted separately, so
             re-ingesting would add them a second time. Nothing is deleted or removed then.
         FileNotFoundError
-            If a run that wrote files has none left in the catalog, most
-            likely because the weekly re-import merged them, and
-            ``missing_files_ok`` is False. Nothing is deleted or removed then.
+            If any of the runs' chunks isn't in ``landing_dir`` any more (even
+            with ``missing_files_ok``), or if a run that wrote files has none
+            left in the catalog, most likely because the weekly re-import
+            merged them, and ``missing_files_ok`` is False. Nothing is deleted
+            or removed then.
         LockHeldError
             If another job holds the pipeline lock. Nothing is deleted or removed then.
         """
-        catalog_dir = Path(catalog_dir)
+        catalog_dir, landing_dir = Path(catalog_dir), Path(landing_dir)
         with self.lock("reingest"):
             runs = self._find_runs(run_ids)
             consolidated = [r.run_id for r in runs if r.consolidated]
@@ -241,6 +252,12 @@ class PipelineState:
                 raise ValueError(
                     f"runs {consolidated} are consolidated into Npix=*.parquet files, so their "
                     "alerts can't be deleted separately and re-ingesting would add them a second time"
+                )
+            gone = [c for r in runs for c in r.chunks if not (landing_dir / c).exists()]
+            if gone:
+                raise FileNotFoundError(
+                    f"{len(gone)} of the runs' chunks aren't in {landing_dir} any more "
+                    f"(e.g. {gone[0]}), so their alerts can't be ingested again"
                 )
             files = {
                 r.run_id: list(catalog_dir.glob(f"**/Npix=*/{r.file_name}")) for r in runs if r.file_name

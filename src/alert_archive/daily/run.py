@@ -3,7 +3,9 @@
 Each run, while holding the pipeline lock:
 
 1. Stops (and emails) if the format-change flag is set.
-2. Deletes files left by a crashed run (:func:`~.increment.remove_orphan_files`).
+2. Deletes files left by a crashed run (:func:`~.increment.remove_orphan_files`),
+   and landing chunks ingested more than :data:`LANDING_RETENTION` ago
+   (:func:`remove_old_chunks`).
 3. Finds landing chunks that no run has ingested yet. Chunks with unexpected
    names (e.g. the raw archive's duplicate 5-digit prefix directories) or
    unreadable footers are skipped and reported; the next run retries them.
@@ -22,7 +24,7 @@ means the run didn't happen.
 import logging
 import re
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import hats
@@ -50,6 +52,14 @@ Other names are skipped. In particular, the raw archive once filed alerts
 under 5-digit prefix directories as well as their usual 6-digit ones (see
 :data:`alert_archive.baseline.DUPLICATE_PREFIXES`), and converting those
 would ingest every alert twice.
+"""
+
+LANDING_RETENTION = timedelta(days=7)
+"""How long a chunk stays in the landing dir after a run ingests it.
+
+Until then, the run can still be re-ingested
+(:meth:`~alert_archive.state.PipelineState.reingest_runs`), e.g. after a bug
+fix. After that, the chunk is deleted so the landing dir doesn't keep growing.
 """
 
 INCREMENT_NAME = "increment"
@@ -99,6 +109,7 @@ class DailyPipeline(Pipeline):
             if not runs:
                 raise FileNotFoundError(f"{state.log_path} has no runs; build the baseline first")
             remove_orphan_files(paths.working_dir, [r.file_name for r in runs if r.file_name])
+            remove_old_chunks(paths.landing_dir, runs)
 
             run_id = new_run_id()
             started = datetime.now(UTC).isoformat()
@@ -176,6 +187,60 @@ def find_new_chunks(landing_dir, ingested) -> tuple[list[Path], dict[str, str]]:
         else:
             skipped[path.name] = "unexpected name, not <6-digit alertId prefix>__<start>-<end>.parquet"
     return chunks, skipped
+
+
+def remove_old_chunks(
+    landing_dir, runs, now: datetime | None = None, retention: timedelta = LANDING_RETENTION
+) -> list[str]:
+    """Delete the landing chunks that runs started more than ``retention`` ago ingested.
+
+    Only chunks listed in a run's ``chunks`` are deleted. Skipped, failing and
+    misnamed chunks stay until someone deals with them. Call this holding the
+    pipeline lock, so a concurrent re-ingest can't take a run off the log
+    between reading it and deleting its chunks.
+
+    The converter doesn't write a chunk again once its subdirectory is in the
+    manifest. If it does (the subdirectory had a failed chunk for longer than
+    ``retention``), the new copy is already listed as ingested, so it's never
+    ingested twice and the next run deletes it again.
+
+    A file that can't be deleted is logged and left, so it never fails the run.
+
+    Parameters
+    ----------
+    landing_dir : str or path-like
+        The landing directory.
+    runs : list[RunRecord]
+        The ingested log's runs.
+    now : datetime or None
+        Time to use instead of the current time. Must be timezone-aware.
+    retention : datetime.timedelta
+        How long to keep a chunk after the run that ingested it started.
+
+    Returns
+    -------
+    list[str]
+        Names of the deleted chunks, sorted.
+    """
+    cutoff = (now or datetime.now(UTC)) - retention
+    landing_dir = Path(landing_dir)
+    removed = []
+    for run in runs:
+        if datetime.fromisoformat(run.started) >= cutoff:
+            continue
+        for name in run.chunks:
+            path = landing_dir / name
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                logger.warning("Couldn't delete ingested chunk %s: %s", path, exc)
+                continue
+            removed.append(name)
+    if removed:
+        logger.info("Deleted %d chunks ingested before %s from %s.", len(removed), cutoff, landing_dir)
+    return sorted(removed)
 
 
 def check_formats(chunks) -> tuple[dict[str, ConformReport], dict[str, str]]:

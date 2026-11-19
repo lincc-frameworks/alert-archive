@@ -92,10 +92,13 @@ chunks again:
 ```bash
 python -c "
 from alert_archive.state import PipelineState
-PipelineState('$ROOT/state').reingest_runs('$ROOT/working', ['<run_id>', ...])
+PipelineState('$ROOT/state').reingest_runs('$ROOT/working', ['<run_id>', ...], landing_dir='$ROOT/landing')
 "
 ```
 
 It refuses runs whose alerts are in consolidated `Npix=<pixel>.parquet` files,
 such as the baseline import, since their alerts can't be deleted separately.
+It also refuses runs whose chunks are gone from `landing/`: the daily run
+deletes chunks a week after ingesting them, so only the last week's runs can
+be redone.
 The catalog's metadata counts the deleted files until the next run rebuilds it.

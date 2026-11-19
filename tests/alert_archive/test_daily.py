@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import hats
 import lsdb
 import pyarrow as pa
@@ -5,7 +7,13 @@ import pyarrow.parquet as pq
 import pytest
 from alert_archive.daily import run as daily
 from alert_archive.daily.increment import leaf_files
-from alert_archive.daily.run import DailyPipeline, check_formats, find_new_chunks, main
+from alert_archive.daily.run import (
+    DailyPipeline,
+    check_formats,
+    find_new_chunks,
+    main,
+    remove_old_chunks,
+)
 from alert_archive.state import PipelineState, RunRecord
 from conftest import BASELINE_CHUNK_NAMES, shift_ids
 from dask.distributed import Client
@@ -135,6 +143,48 @@ def test_daily_removes_orphans(v2_config, landing, tmp_path):
     orphan.write_bytes(b"left by a crashed run")
     run_daily(v2_config, tmp_path, email=False)
     assert not orphan.exists()
+
+
+def test_daily_removes_old_chunks(v2_config, landing, new_alerts, tmp_path):
+    """Chunks a run ingested over a week ago are deleted from the landing dir; new ones are ingested."""
+    old = "313628__00000000-00000004.parquet"
+    (landing / old).touch()
+    eight_days_ago = (datetime.now(UTC) - timedelta(days=8)).isoformat()
+    PipelineState(v2_config.paths.state_dir).append_run(
+        RunRecord(run_id="20000101T000000Z", started=eight_days_ago, chunks=[old])
+    )
+    pq.write_table(new_alerts, landing / NEW_CHUNK)
+
+    record = run_daily(v2_config, tmp_path, email=False)
+
+    assert record.chunks == [NEW_CHUNK]
+    assert sorted(p.name for p in landing.iterdir()) == [NEW_CHUNK]
+
+
+def test_remove_old_chunks(tmp_path, caplog):
+    """Only chunks listed by runs older than the retention are deleted. Missing ones are fine,
+    and one that can't be deleted is logged and left."""
+    now = datetime(2026, 11, 19, tzinfo=UTC)
+    names = ["old.parquet", "undeletable.parquet", "recent.parquet", "skipped.parquet", "unlisted.parquet"]
+    for name in names:
+        (tmp_path / name).touch()
+    (tmp_path / "undeletable.parquet").unlink()
+    (tmp_path / "undeletable.parquet").mkdir()  # unlink() raises on a directory
+    runs = [
+        RunRecord(
+            run_id="r1",
+            started=(now - timedelta(days=8)).isoformat(),
+            chunks=["old.parquet", "gone.parquet", "undeletable.parquet"],
+            skipped={"skipped.parquet": "corrupt"},
+        ),
+        RunRecord(run_id="r2", started=(now - timedelta(days=6)).isoformat(), chunks=["recent.parquet"]),
+    ]
+
+    assert remove_old_chunks(tmp_path, runs, now=now) == ["old.parquet"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(set(names) - {"old.parquet"})
+    assert "undeletable.parquet" in caplog.text
+
+    assert remove_old_chunks(tmp_path, runs, now=now, retention=timedelta(days=1)) == ["recent.parquet"]
 
 
 def test_daily_needs_baseline(v2_config, tmp_path):

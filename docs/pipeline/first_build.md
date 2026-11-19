@@ -118,8 +118,11 @@ catalog ever has to be rebuilt from the dump:
 1. Move `working/` and `state/` aside. The baseline won't run while either has
    anything in it.
 2. Run the baseline, then the replay. The replay's first run also ingests
-   every chunk the converter has written to `landing/`, since the new log
-   doesn't list them, so when the replay finishes the catalog is up to date.
+   every chunk in `landing/`, since the new log doesn't list them. The daily
+   run deletes chunks a week after ingesting them, so first convert the raw
+   archive again into a fresh `landing/` (move the old one aside: the
+   converter skips every subdirectory in its manifest). When the replay
+   finishes, the catalog is up to date.
 
 The `baseline_*` and `replay_*` directories next to `working/` are backups from
 the first build: the catalog and its state as each step left them.

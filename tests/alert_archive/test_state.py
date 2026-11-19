@@ -16,6 +16,15 @@ def make_written_run(run_id, chunks=()):
     return make_run(run_id, chunks, num_rows=1)
 
 
+def landing(tmp_path, *chunks):
+    """A landing dir holding empty files with the given chunk names."""
+    path = tmp_path / "landing"
+    path.mkdir(exist_ok=True)
+    for chunk in chunks:
+        (path / chunk).touch()
+    return path
+
+
 def test_new_run_id_is_utc_timestamp():
     """Run IDs are the start time in UTC, to the second."""
     now = datetime(2026, 10, 27, 3, 15, 0, tzinfo=UTC)
@@ -112,7 +121,7 @@ def test_reingest_runs_deletes_files_and_log_lines(tmp_path):
     state.append_run(make_written_run("r2", ["b"]))
     state.append_run(make_run("r3", skipped={"c": "corrupt"}))
 
-    removed = state.reingest_runs(catalog, ["r1", "r3"])
+    removed = state.reingest_runs(catalog, ["r1", "r3"], landing_dir=landing(tmp_path, "a", "b"))
 
     assert [r.run_id for r in removed] == ["r1", "r3"]
     assert not any(p.exists() for p in r1_files)
@@ -130,7 +139,7 @@ def test_reingest_refuses_merged_runs(tmp_path):
     state.append_run(make_written_run("r2", ["b"]))
 
     with pytest.raises(FileNotFoundError, match="r2"):
-        state.reingest_runs(catalog, ["r1", "r2"])
+        state.reingest_runs(catalog, ["r1", "r2"], landing_dir=landing(tmp_path, "a", "b"))
 
     assert all(p.exists() for p in r1_files)
     assert state.ingested_chunks() == {"a", "b"}
@@ -141,7 +150,9 @@ def test_reingest_missing_files_ok(tmp_path):
     e.g. to finish a call that stopped after deleting them."""
     state = PipelineState(tmp_path / "state")
     state.append_run(make_written_run("r1", ["a"]))
-    removed = state.reingest_runs(tmp_path / "catalog", ["r1"], missing_files_ok=True)
+    removed = state.reingest_runs(
+        tmp_path / "catalog", ["r1"], landing_dir=landing(tmp_path, "a"), missing_files_ok=True
+    )
     assert [r.run_id for r in removed] == ["r1"]
     assert state.runs() == []
 
@@ -157,9 +168,31 @@ def test_reingest_refuses_consolidated_runs(tmp_path):
     state.append_run(make_written_run("r2", ["b"]))
 
     with pytest.raises(ValueError, match="r1"):
-        state.reingest_runs(catalog, ["r1", "r2"], missing_files_ok=True)
+        state.reingest_runs(
+            catalog, ["r1", "r2"], landing_dir=landing(tmp_path, "a", "b"), missing_files_ok=True
+        )
 
     assert all(p.exists() for p in consolidated + r2_files)
+    assert state.ingested_chunks() == {"a", "b"}
+
+
+@pytest.mark.parametrize("missing_files_ok", [False, True])
+def test_reingest_refuses_runs_whose_chunks_are_gone(tmp_path, missing_files_ok):
+    """A run whose chunks were deleted from the landing dir can't be ingested again,
+    so its files and log line stay, and so do those of the other runs listed with it."""
+    state = PipelineState(tmp_path / "state")
+    catalog = tmp_path / "catalog"
+    files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
+    files += write_catalog_files(catalog, "r2.parquet", [(1, 10)])
+    state.append_run(make_written_run("r1", ["a"]))
+    state.append_run(make_written_run("r2", ["b"]))
+
+    with pytest.raises(FileNotFoundError, match=r"e\.g\. b\)"):
+        state.reingest_runs(
+            catalog, ["r1", "r2"], landing_dir=landing(tmp_path, "a"), missing_files_ok=missing_files_ok
+        )
+
+    assert all(p.exists() for p in files)
     assert state.ingested_chunks() == {"a", "b"}
 
 
@@ -177,7 +210,7 @@ def test_reingest_unknown_run_changes_nothing(tmp_path):
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
     state.append_run(make_written_run("r1", ["a"]))
     with pytest.raises(KeyError, match="nope"):
-        state.reingest_runs(catalog, ["r1", "nope"])
+        state.reingest_runs(catalog, ["r1", "nope"], landing_dir=landing(tmp_path, "a"))
     assert all(p.exists() for p in r1_files)
     assert [r.run_id for r in state.runs()] == ["r1"]
 
@@ -189,7 +222,7 @@ def test_reingest_refuses_while_locked(tmp_path):
     r1_files = write_catalog_files(catalog, "r1.parquet", [(1, 10)])
     state.append_run(make_written_run("r1", ["a"]))
     with state.lock("daily"), pytest.raises(LockHeldError):
-        state.reingest_runs(catalog, ["r1"])
+        state.reingest_runs(catalog, ["r1"], landing_dir=landing(tmp_path, "a"))
     assert all(p.exists() for p in r1_files)
     assert [r.run_id for r in state.runs()] == ["r1"]
     assert not state.lock_path.exists()
