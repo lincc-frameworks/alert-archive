@@ -99,7 +99,7 @@ class WeeklyPipeline(Pipeline):
                 client, source_dir, collection_dir, version, self.config.import_config
             )
 
-            state.mark_consolidated(r.run_id for r in runs if not r.consolidated)
+            state._mark_consolidated(r.run_id for r in runs if not r.consolidated)
             set_current_version(collection_dir, version)
             logger.info("%s now points to version %s.", collection_dir, version)
             remove_versions(collection_dir, collection_versions(collection_dir) - {version, previous})

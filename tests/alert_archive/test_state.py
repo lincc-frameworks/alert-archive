@@ -178,7 +178,7 @@ def test_mark_consolidated(tmp_path):
     state.append_run(make_written_run("r2", ["b"]))
     state.append_run(make_written_run("r3", ["c"]))
 
-    state.mark_consolidated(["r2"])
+    state._mark_consolidated(["r2"])
 
     runs = state.runs()
     assert [r.run_id for r in runs] == ["r1", "r2", "r3"]

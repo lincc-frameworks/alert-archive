@@ -30,8 +30,10 @@ ROOT=${1:-/sdf/data/rubin/shared/lsdb_commissioning/rubin_alert_archive_v2}
 
 echo "=== $(date) job $SLURM_JOB_ID: $ROOT ==="
 
+set -e
 export SHELL=/bin/bash
 export PYTHONUNBUFFERED=1
+source /sdf/group/rubin/sw/loadLSST.sh
 setup lsst_distrib
 
 python -c "import sys; from alert_archive.weekly.run import main; print(main(sys.argv[1]))" "$ROOT"

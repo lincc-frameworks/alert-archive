@@ -289,8 +289,11 @@ class PipelineState:
         write_atomic(self.log_path, "".join(r.to_json() + "\n" for r in kept))
         return removed
 
-    def mark_consolidated(self, run_ids):
+    def _mark_consolidated(self, run_ids):
         """Mark the runs a weekly re-import merged as :attr:`~RunRecord.consolidated`.
+
+        Only the weekly re-import should call this, holding the lock, since it
+        rewrites the whole log.
 
         :meth:`reingest_runs` then refuses them, even with ``missing_files_ok``,
         since re-ingesting would add their alerts a second time. Call it before
