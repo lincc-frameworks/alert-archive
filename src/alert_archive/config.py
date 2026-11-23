@@ -38,9 +38,9 @@ class PathConfig:
     Everything lives under one root::
 
         rubin_alert_archive_v2/
-        ├── landing/   parquet chunks waiting to be ingested
-        ├── state/     ingested log, format-change flag, lock
-        └── working/   HATS catalog the daily runs write to
+        ├── landing/       parquet chunks waiting to be ingested
+        ├── state/         ingested log, format-change flag, lock
+        └── collections/   HATS collection; the daily runs write to its current version
 
     Attributes
     ----------
@@ -73,7 +73,7 @@ class PathConfig:
 
     @property
     def working_dir(self) -> Path:
-        """The working HATS catalog, which grows nightly."""
+        """The baseline's HATS catalog, until it's moved into ``collections/``."""
         return self.root / "working"
 
     def __post_init__(self):

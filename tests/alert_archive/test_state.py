@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 from alert_archive.state import LockHeldError, PipelineState, RunRecord, new_run_id
+from zoneinfo import ZoneInfo
 
 
 def make_run(run_id, chunks=(), skipped=None, **kwargs):
@@ -20,6 +21,13 @@ def test_new_run_id_is_utc_timestamp():
     """Run IDs are the start time in UTC, to the second."""
     now = datetime(2026, 10, 27, 3, 15, 0, tzinfo=UTC)
     assert new_run_id(now) == "20261027T031500Z"
+
+
+def test_new_run_id_date_only_is_utc_date():
+    """Version IDs are the UTC date, which can differ from the local one."""
+    # 11:30 pm Pacific on Nov 7 is 7:30 am on Nov 8 in UTC, so the version is named 20261108.
+    now = datetime(2026, 11, 7, 23, 30, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    assert new_run_id(now, date_only=True) == "20261108"
 
 
 def test_file_name_derived_from_run_id():
@@ -161,6 +169,20 @@ def test_reingest_refuses_consolidated_runs(tmp_path):
 
     assert all(p.exists() for p in consolidated + r2_files)
     assert state.ingested_chunks() == {"a", "b"}
+
+
+def test_mark_consolidated(tmp_path):
+    """Marked runs become consolidated in the log; the others and the run order are unchanged."""
+    state = PipelineState(tmp_path / "state")
+    state.append_run(make_run("r1", ["a"], num_rows=1, consolidated=True))
+    state.append_run(make_written_run("r2", ["b"]))
+    state.append_run(make_written_run("r3", ["c"]))
+
+    state._mark_consolidated(["r2"])
+
+    runs = state.runs()
+    assert [r.run_id for r in runs] == ["r1", "r2", "r3"]
+    assert [r.consolidated for r in runs] == [True, True, False]
 
 
 def test_run_record_reads_lines_without_consolidated():

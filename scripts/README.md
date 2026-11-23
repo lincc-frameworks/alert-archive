@@ -4,6 +4,7 @@ Slurm jobs for running the pipeline on S3DF. The code they run lives in the
 `alert_archive` package.
 
 - `convert_from_avro.sbatch`: converts the new raw alerts to parquet, nightly.
+- `weekly.sbatch`: re-imports the catalog as a new version of `collections/`, weekly.
 
 ## Converting the raw alerts
 

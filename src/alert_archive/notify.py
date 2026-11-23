@@ -174,3 +174,27 @@ def daily_failure_summary(exc: BaseException) -> tuple[str, str]:
         lines.append(f"Slurm job {job_id}; log: alert-archive-daily-{job_id}.log")
     lines += ["", "TRACEBACK", *traceback.format_exception(exc)]
     return subject, "\n".join(line.rstrip("\n") for line in lines) + "\n"
+
+
+def weekly_skipped_summary(flag: dict) -> tuple[str, str]:
+    """Build the email for a weekly re-import skipped because the format-change flag is set.
+
+    Parameters
+    ----------
+    flag : dict
+        The flag's contents, from :meth:`PipelineState.format_change`.
+
+    Returns
+    -------
+    tuple[str, str]
+        The subject and body.
+    """
+    subject = f"{PROBLEM_MARK} weekly: skipped, format-change flag set since {flag['flagged_at']}"
+    lines = [
+        "The format-change flag is set, so the weekly re-import was skipped.",
+        "Add the format, clear the flag, then run it again: sbatch scripts/weekly.sbatch",
+        "",
+        "Runs that found a format change:",
+        *(f"  {run['run_id']} ({run['time']}): {run['details']}" for run in flag["runs"]),
+    ]
+    return subject, "\n".join(lines) + "\n"
