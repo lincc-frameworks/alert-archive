@@ -14,6 +14,10 @@
 # are cleaned up automatically.
 # It needs the baseline (scripts/baseline.sbatch) first.
 #
+# Cron submits this every night through scripts/submit_daily.sh, from a
+# dedicated clone of main. The one-hour limit keeps a slow run from
+# overlapping the 06:17 benchmarks (see "Schedule" in scripts/README.md).
+#
 # Uses the LSST conda env named by ALERT_ARCHIVE_LSST_ENV (default
 # lsst-scipipe-13.0.0), with whatever lsdb/hats/hats-import it sees,
 # including packages in ~/.local.
@@ -23,7 +27,7 @@
 #SBATCH --constraint=OS_VER:9.6
 #SBATCH --exclusive
 #SBATCH --mem=0
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT
 #SBATCH --output=%x-%j.log
 

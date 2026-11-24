@@ -51,9 +51,10 @@ new version named by its UTC date, and makes it current. The previous version is
 kept and opens on its own. e.g. `lsdb.open_catalog(".../rubin_alert_archive/20261031")`.
 See {py:mod}`alert_archive.weekly.run`.
 
-**Scheduling (coming soon).** For now, the daily and weekly runs are started by
-hand, with `sbatch scripts/daily.sbatch` and `sbatch scripts/weekly.sbatch`.
-Cron jobs will start them.
+**Scheduling.** Cron starts the daily run every night at 05:07 Pacific, after
+the converter (04:00) and before the nightly benchmarks (06:17). The weekly
+re-import is still started by hand, with `sbatch scripts/weekly.sbatch`. See
+"Schedule" in `scripts/README.md`.
 
 **Baseline and replay (one time).** The catalog was started from Neven's
 Parquet dump of the archive, until alerts stopped flowing in mid-July 2026

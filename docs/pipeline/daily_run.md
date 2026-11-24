@@ -45,7 +45,11 @@ The run ID is the run's start time in UTC, like `20261102T225212Z`.
 
 ## Running it
 
-Run it from the root of your clone:
+Cron runs it every night at 05:07 Pacific, through `scripts/submit_daily.sh`,
+from a dedicated clone of `main` (see "Schedule" in `scripts/README.md`). Its
+logs are in `logs/` in the archive root.
+
+To run it by hand, run it from the root of your clone:
 
 ```bash
 cd ~/alert-archive
@@ -59,7 +63,7 @@ The job refuses to start unless:
 - `alert_archive` imports from this clone (`pip install -e .`).
 
 It runs on a whole `milano` node on the `rubin:default` account, with a
-two-hour limit. Jobs on that account are preemptable: Slurm can cancel them at
+one-hour limit. Jobs on that account are preemptable: Slurm can cancel them at
 any time to make room for higher-priority work. A cancelled run leaves its lock
 behind, and the next run takes it over (see [Runbook](runbook.md)).
 
