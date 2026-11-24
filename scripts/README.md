@@ -27,7 +27,11 @@ The daily run sits between the converter and the benchmarks:
 - **Before the benchmarks.** The daily run holds `state/lock` while it writes,
   and the benchmarks skip the night if the lock exists, rather than time a
   catalog that's changing. `daily.sbatch` has a one-hour limit, so a run
-  started at 05:07 ends before 06:17.
+  that starts on time ends before 06:17. The limit counts from when the job
+  starts, though, so if it waits in the queue it can still overlap the
+  benchmarks; they skip that night (or, if the job starts after they do, time
+  a catalog that's changing). Fresh data matters more than one night of
+  benchmarks, so there's no `--deadline`.
 - **The weekly re-import** takes the same lock, so it can't overlap a daily run.
 
 `submit_daily.sh` resets its own clone (under

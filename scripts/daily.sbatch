@@ -6,8 +6,9 @@
 # dedicated clone of main. alert_archive imports from that clone through
 # PYTHONPATH, not an editable install, and the log goes to the shared logs/
 # directory in the archive root, not the clone (see "Schedule" in
-# scripts/README.md). The one-hour limit keeps a slow run from overlapping the
-# 06:17 benchmarks.
+# scripts/README.md). The one-hour limit keeps a run that starts on time from
+# overlapping the 06:17 benchmarks; one that waits in the queue still could in
+# theory (but at the time of this writing, each run takes just 5-10 minutes).
 #
 # To run it by hand instead, submit from the root of a clone with no
 # uncommitted changes, whose editable install (pip install -e .) points at
