@@ -2,13 +2,22 @@
 # Run the daily pipeline once: ingest every chunk in landing/ that no run has
 # ingested yet. See "The daily run" in docs/design/incremental_data_flow.md.
 #
-# Run it from the root of a clone whose editable install
-# (pip install -e .) points at that clone, with no uncommitted changes:
+# Cron submits this every night through scripts/submit_daily.sh, from a
+# dedicated clone of main. alert_archive imports from that clone through
+# PYTHONPATH, not an editable install, and the log goes to the shared logs/
+# directory in the archive root, not the clone (see "Schedule" in
+# scripts/README.md). The one-hour limit keeps a run that starts on time from
+# overlapping the 06:17 benchmarks; one that waits in the queue still could in
+# theory (but at the time of this writing, each run takes just 5-10 minutes).
+#
+# To run it by hand instead, submit from the root of a clone with no
+# uncommitted changes, whose editable install (pip install -e .) points at
+# that clone:
 #
 #   sbatch --mail-user=<you@example.org> scripts/daily.sbatch
 #
-# The log, alert-archive-daily-<jobid>.log, lands in the repo root. The run
-# sends its own summary email, even when there's nothing new or it fails.
+# The log, alert-archive-daily-<jobid>.log, then lands in the repo root. The
+# run sends its own summary email, even when there's nothing new or it fails.
 # If the job is killed mid-run, it leaves state/lock behind; check that nothing
 # is running, delete the lock, then resubmit. Files from the interrupted run
 # are cleaned up automatically.
@@ -23,7 +32,7 @@
 #SBATCH --constraint=OS_VER:9.6
 #SBATCH --exclusive
 #SBATCH --mem=0
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT
 #SBATCH --output=%x-%j.log
 
@@ -48,7 +57,9 @@ if ! git diff --quiet HEAD; then
 fi
 package=$(python -c "import alert_archive, pathlib; print(pathlib.Path(alert_archive.__file__).resolve().parent)")
 if [ "$package" != "$(realpath "$repo/src/alert_archive")" ]; then
-    echo "alert_archive imports from $package, not $repo/src; pip install -e $repo first." >&2
+    echo "alert_archive imports from $package, not $repo/src." >&2
+    echo "From cron: check the PYTHONPATH that submit_daily.sh exports." >&2
+    echo "By hand: pip install -e $repo, or submit with PYTHONPATH=$repo/src exported." >&2
     exit 1
 fi
 echo "Branch: $(git rev-parse --abbrev-ref HEAD)"

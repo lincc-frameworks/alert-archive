@@ -179,6 +179,15 @@ for this repo, red = alert-format-change handling, orange dashed = not settled y
   from 1000/1100 alerts get nulls for the four new `diaSource` fields
   (`exposureTime`, `reliabilityVersion`, `trailAlgorithm`, `trail_flag`).
   `prvDiaSources` reuses the `diaSource` definition, so it gets the same four fields.
+- **Format 1102 is ingested without its new fields, for now.** 1102 (from
+  2026-11-11) adds seven `diaSource`/`prvDiaSources` fields
+  (`mixedInstruments`, `pixelFlags_spike`, `templateInstrument`,
+  `templateMjdMin`/`Mean`/`Max`, `templateVersion`) and changes nothing else.
+  The catalog keeps the 1101 columns (`CATALOG_SCHEMA_ID`), and 1102 alerts
+  are ingested with those seven fields dropped. Dropping fields of a known
+  newer format isn't a format change; any other dropped field still is.
+  Adding the fields means raising `CATALOG_SCHEMA_ID` and re-importing the
+  whole catalog. The raw Avro alerts keep the values until then.
 - **`ssSource` and `mpc_orbits` are left out for now (may revisit).** All three
   alert formats include them for solar-system alerts (about 21% of alerts),
   but Neven's dump and the frozen catalog drop them. These values exist only
@@ -333,5 +342,5 @@ schedule until step 9.
 | 6 | **Baseline** | `baseline.py`: full import of the Jun 26 chunks into `working/` (skipping the 5-digit duplicates; 200k-row partitions), logged as one run; `scripts/baseline.sbatch` to run it; `AlertReader` always conforms to the catalog's columns; consolidated `Npix=<pixel>.parquet` names exempt from orphan cleanup | small |
 | 7 | **Daily run + replay** | `daily/run.py` (incl. footer format check, stop + flag + email on an unknown format, orphan cleanup at start, skips misnamed chunks), `mock/replay.py` (one prefix per run, via `landing/`), `scripts/replay.sbatch`, end-to-end test (baseline → replay) | medium |
 | 8 | **Weekly re-import** | `weekly/run.py`, `weekly/reimport.py`, `collection.py`: re-import into a new dated version of `collections/` with margin and `diaSourceId` index, `_mark_consolidated`, atomic swap, keep the previous version; `collection.adopt_working` to move `working/` in once; `scripts/weekly.sbatch` | medium |
-| 9 | **Scheduling** | cron/Slurm scripts, run against the real v2 directory | small |
+| 9 | **Scheduling** | `scripts/submit_daily.sh`: cron entry point that runs `daily.sbatch` from a clone of `main` at 05:07 Pacific, between the converter and the benchmarks; schedule in `scripts/README.md` | small |
 | 10 | **Converter** | Port of Neven's `import_alerts.py`: Avro → parquet, keeps all fields (incl. 1101), per-alert `schemaId` from the Avro header, only new alerts; decide on `ssSource`/`mpc_orbits`; replaces the `schemaId` mock | medium |

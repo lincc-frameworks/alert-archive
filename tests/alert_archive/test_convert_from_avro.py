@@ -81,9 +81,10 @@ def test_convert_chunk_writes_catalog_columns(tmp_path, avro_alert_files):
     assert exposure_time.isna().tolist() == [True, True, False, False]
     assert exposure_time.iloc[2] == pytest.approx(38.0, abs=1e-3)
     assert exposure_time.iloc[3] == pytest.approx(30.0, abs=1e-3)
-    template_instrument = chunk["diaSource"].struct.field("templateInstrument")
-    assert template_instrument.isna().tolist() == [True, True, True, False]
-    assert template_instrument.iloc[3] == "LSSTCam"
+    # TODO: To be uncommented when the catalog schema is updated to 1102
+    # template_instrument = chunk["diaSource"].struct.field("templateInstrument")
+    # assert template_instrument.isna().tolist() == [True, True, True, False]
+    # assert template_instrument.iloc[3] == "LSSTCam"
 
 
 def test_convert_chunk_fails_on_any_bad_file(tmp_path, avro_alert_files):

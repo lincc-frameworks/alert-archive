@@ -4,7 +4,52 @@ Slurm jobs for running the pipeline on S3DF. The code they run lives in the
 `alert_archive` package.
 
 - `convert_from_avro.sbatch`: converts the new raw alerts to parquet, nightly.
+- `daily.sbatch`: ingests the new parquet chunks into the working catalog, nightly.
+- `submit_daily.sh`: cron entry point for `daily.sbatch`; runs it from a clone of `main`.
 - `weekly.sbatch`: re-imports the catalog as a new version of `collections/`, weekly.
+
+## Schedule
+
+Times are Pacific. Each job runs from its owner's crontab on `sdfcron001`. The
+weekly time is the one planned in `weekly.sbatch`; it's started by hand for now.
+
+| Time | Job | Owner | Reads | Writes |
+|---|---|---|---|---|
+| 04:00 | `convert_from_avro.sbatch` | Sandro | raw Avro alerts | `landing/` |
+| 05:07 | `submit_daily.sh` → `daily.sbatch` | Olivia | `landing/` | `working/` catalog, `state/` |
+| 06:17 | nightly benchmarks (`benchmarks/nightly/`) | Olivia | `working/` catalog | benchmark results |
+| Sat 08:00 (not scheduled yet) | `weekly.sbatch` | Sandro | current version | new version of `collections/` |
+
+The daily run sits between the converter and the benchmarks:
+
+- **After the converter.** The converter usually finishes in seconds. A chunk
+  it writes during a daily run isn't lost, but will simply be ingested by the next night's run.
+- **Before the benchmarks.** The daily run holds `state/lock` while it writes,
+  and the benchmarks skip the night if the lock exists, rather than time a
+  catalog that's changing. `daily.sbatch` has a one-hour limit, so a run
+  that starts on time ends before 06:17. The limit counts from when the job
+  starts, though, so if it waits in the queue it can still overlap the
+  benchmarks; they skip that night (or, if the job starts after they do, time
+  a catalog that's changing). Fresh data matters more than one night of
+  benchmarks, so there's no `--deadline`.
+- **The weekly re-import** takes the same lock, so it can't overlap a daily run.
+
+`submit_daily.sh` resets its own clone (under
+`/sdf/data/rubin/user/<you>/rubin_alert_archive_daily/`) to `origin/main` and
+submits `daily.sbatch` from it, so the catalog is only built from merged code,
+never from anyone's checkout. It skips the night if a daily job is still
+queued or running. Logs go to `logs/` in the archive root: `cron.log` has one
+line per step of every run, and each job writes `alert-archive-daily-<jobid>.log`.
+
+To set it up, or to try a branch (this writes the real catalog):
+
+```bash
+git clone https://github.com/lincc-frameworks/alert-archive.git /sdf/data/rubin/user/$USER/rubin_alert_archive_daily/alert-archive
+/sdf/data/rubin/user/$USER/rubin_alert_archive_daily/alert-archive/scripts/submit_daily.sh [branch]
+```
+
+then add the crontab line from the top of `submit_daily.sh` with `crontab -e`
+on `sdfcron001`.
 
 ## Converting the raw alerts
 
