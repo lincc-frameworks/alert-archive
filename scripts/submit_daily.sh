@@ -88,7 +88,7 @@ main() {
         log "cloning alert-archive into $repo"
         git clone --quiet https://github.com/lincc-frameworks/alert-archive.git "$repo"
     fi
-    git -C "$repo" fetch --quiet origin
+    git -C "$repo" fetch --quiet --prune origin
     git -C "$repo" checkout --quiet --force --detach "origin/$branch"
     local commit
     commit=$(git -C "$repo" rev-parse --short HEAD)
